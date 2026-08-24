@@ -1,3 +1,6 @@
 [submodule "third_party/reBotArm_control_py"]
 	path = third_party/reBotArm_control_py
 	url = git@github.com:etince11e/reBotArm_control_py_fork.git
+[submodule "third_party/XenseVR-PC-Service"]
+	path = third_party/XenseVR-PC-Service
+	url = https://github.com/Vertax42/XenseVR-PC-Service.git
