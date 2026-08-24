@@ -176,3 +176,29 @@ outputs/
 *.urdf
 *.xml
 *.part
+
+### Nested SDK and native build outputs ###
+**/.venv/
+**/venv/
+**/.conda/
+**/CMakeFiles/
+**/cmake-build-*/
+*.o
+*.obj
+*.a
+*.d
+*.pdb
+*.ilk
+*.exp
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.bin
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+### Local environment overrides ###
+.env.*
+!.env.example

@@ -74,6 +74,10 @@ def make_robot_from_config(config: RobotConfig) -> Robot:
         from .rebot_b601_follower import RebotB601Follower
 
         return RebotB601Follower(config)
+    elif config.type == "rebot_rs_follower":
+        from .rebot_rs_follower import RebotRSFollower
+
+        return RebotRSFollower(config)
     elif config.type == "bi_rebot_b601_follower":
         from .bi_rebot_b601_follower import BiRebotB601Follower
 

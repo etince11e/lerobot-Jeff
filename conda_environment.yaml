@@ -1,0 +1,12 @@
+name: lerobot-rebot-py312
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - cmake>=3.29
+  - ninja
+  - make
+  - pybind11
+  - setuptools>=71
+  - wheel

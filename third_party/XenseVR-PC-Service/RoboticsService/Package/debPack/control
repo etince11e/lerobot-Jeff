@@ -1,0 +1,9 @@
+Package: xensevr-pc-service
+Version: 0.2.1
+Architecture: amd64
+Maintainer: roboticsservice.support@bytedance.com
+Depends:
+Section: default
+Priority: optional
+Homepage: https://business-cn.picoxr.com/
+Description: XenseVR PC Service - VR Teleoperation Robot Control Service
