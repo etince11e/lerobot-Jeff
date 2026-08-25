@@ -38,7 +38,24 @@ class RebotRSFollowerConfig:
     hw_yaml: str | None = None
 
     # Arm control mode used by the SDK JointGroup.
-    arm_control_mode: str = "posvel"
+    # Use RobStride MIT position/velocity/torque control for all arm joints.
+    # ``posvel`` remains accepted by the follower for explicit compatibility,
+    # but MIT is the safe/default path for this reBot RS teleoperation setup.
+    arm_control_mode: str = "mit"
+
+    # MIT gravity feed-forward. The value is multiplied by the Pinocchio
+    # gravity torque vector before it is sent as the MIT ``tau`` term.
+    gravity_compensation_enabled: bool = True
+    gravity_compensation_scale: float = 1.0
+
+    # SDK loop rates.  These are explicit here so the LeRobot teleoperation
+    # command does not silently inherit an unnecessarily high rate from the
+    # hardware YAML.  In MIT mode, Type-2 replies update the RX cache and the
+    # periodic feedback sweep is disabled; feedback_rate_hz remains relevant
+    # to the POS_VEL compatibility path and explicit SDK diagnostics.
+    # Set either value to None to use the SDK YAML default.
+    control_rate_hz: float | None = 500.0
+    feedback_rate_hz: float | None = 10.0
 
     # IK solver parameters.
     ik_max_iter: int = 200
@@ -54,6 +71,14 @@ class RebotRSFollowerConfig:
     # Cached hardware feedback older than this is reported as stale. Startup,
     # homing and settle checks still request synchronous feedback explicitly.
     feedback_max_age_s: float = 0.5
+
+    # Optional low-rate diagnostic comparing the MotorBridge Type-2/RX cache
+    # with a synchronous RobStride ``mechPos`` (0x7019) read.  This is
+    # intentionally opt-in because each comparison performs one CAN query.
+    position_compare_enabled: bool = False
+    position_compare_motor_name: str = "joint1"
+    position_compare_interval_s: float = 1.0
+    position_compare_timeout_ms: int = 100
 
     # Pico trigger action is [0, 1]. This maps it to a gripper joint target in rad.
     gripper_open_pos: float = 4.71
@@ -108,6 +133,29 @@ class RebotRSFollowerConfig:
             raise ValueError(f"home_position must have 7 elements (J1..J6 + gripper), got {len(self.home_position)}")
         if self.feedback_max_age_s <= 0:
             raise ValueError(f"feedback_max_age_s must be positive, got {self.feedback_max_age_s}")
+        if not self.position_compare_motor_name:
+            raise ValueError("position_compare_motor_name must not be empty")
+        if not math.isfinite(self.position_compare_interval_s) or self.position_compare_interval_s <= 0:
+            raise ValueError(
+                "position_compare_interval_s must be positive, "
+                f"got {self.position_compare_interval_s}"
+            )
+        if self.position_compare_timeout_ms <= 0:
+            raise ValueError(
+                "position_compare_timeout_ms must be positive, "
+                f"got {self.position_compare_timeout_ms}"
+            )
+        if not math.isfinite(self.gravity_compensation_scale) or self.gravity_compensation_scale < 0:
+            raise ValueError(
+                "gravity_compensation_scale must be finite and non-negative, "
+                f"got {self.gravity_compensation_scale}"
+            )
+        for name, value in (
+            ("control_rate_hz", self.control_rate_hz),
+            ("feedback_rate_hz", self.feedback_rate_hz),
+        ):
+            if value is not None and (not math.isfinite(value) or value <= 0):
+                raise ValueError(f"{name} must be positive when set, got {value}")
         if (
             not math.isfinite(self.joint_target_interpolation_time_s)
             or self.joint_target_interpolation_time_s < 0

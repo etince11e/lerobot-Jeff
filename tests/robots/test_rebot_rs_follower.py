@@ -26,6 +26,7 @@ from lerobot.robots.rebot_rs_follower import RebotRSFollower, RebotRSFollowerRob
 def test_camera_aliases_land_in_observation_features():
     robot = RebotRSFollower(RebotRSFollowerRobotConfig())
 
+    assert robot.config.arm_control_mode == "mit"
     assert "head" in robot.config.cameras
     assert "wrist" in robot.config.cameras
     assert str(robot.config.head_camera.index_or_path) == "/dev/video5"
@@ -182,6 +183,9 @@ def test_async_ik_publishes_completed_result_before_newest_request():
         release_first.set()
 
         assert second_started.wait(timeout=2.0)
+        # A newer request does not invalidate the completed result within the
+        # same teleoperation epoch. The latest-only mailbox still prevents a
+        # queue of old requests from accumulating.
         assert np.allclose(robot._q_target, 1.0)
 
         release_second.set()
@@ -214,6 +218,25 @@ def test_send_action_only_submits_ik_request():
     robot._sdk.solve_ik.assert_not_called()
     with robot._ik_condition:
         assert robot._ik_request is not None
+
+
+def test_mit_control_sends_gravity_feedforward_torque():
+    config = RebotRSFollowerRobotConfig(head_camera=None, wrist_camera=None)
+    robot = RebotRSFollower(config)
+    robot._arm_group = MagicMock(num_joints=6)
+    robot._arm_group.get_positions.return_value = np.zeros(6, dtype=np.float64)
+    robot._sdk = MagicMock()
+    robot._sdk.pad_q_for_model.side_effect = lambda _model, q, _n: np.asarray(q)
+    robot._sdk.compute_generalized_gravity.return_value = np.arange(6, dtype=np.float64)
+    robot._model = object()
+    robot._dynamics_data = object()
+    robot._connected = True
+
+    robot._loop_cb(None, 0.005)
+
+    robot._arm_group.send_mit.assert_called_once()
+    sent_tau = robot._arm_group.send_mit.call_args.kwargs["tau"]
+    assert np.allclose(sent_tau, np.arange(6, dtype=np.float64))
 
 
 def test_async_ik_result_is_dropped_after_epoch_invalidation():

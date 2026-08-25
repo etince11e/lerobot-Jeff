@@ -59,13 +59,30 @@ sudo apt install -y build-essential git git-lfs iproute2 can-utils
 
 ## 环境安装
 
-使用新的仓库名称克隆项目：
+克隆项目并初始化两个 SDK submodule：
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USER/lerobot-Jeff.git
+git clone --recurse-submodules https://github.com/YOUR_GITHUB_USER/lerobot-Jeff.git
 cd lerobot-Jeff
 git lfs install
 git lfs pull
+```
+
+本仓库将 reBot 和 XenseVR SDK 源码作为 Git submodule 管理：
+
+- `third_party/reBotArm_control_py`：reBot 机械臂 SDK。
+- `third_party/XenseVR-PC-Service`：XenseVR PC 服务及原生 SDK。
+
+如果克隆时没有使用 `--recurse-submodules`，请在运行安装脚本前初始化 SDK 目录：
+
+```bash
+git submodule update --init --recursive
+```
+
+可以使用以下命令确认两个 submodule 已经检出：
+
+```bash
+git submodule status
 ```
 
 使用 Mamba 创建 Python 3.12 环境：
@@ -91,7 +108,12 @@ bash ./setup_env.sh --install
 验证安装：
 
 ```bash
-python -c 'import lerobot, motorbridge, pinocchio, reBotArm_control_py, xensevr_pc_service_sdk; print("lerobot-Jeff environment OK")'
+python -c 'import lerobot; print("lerobot OK")'
+python -c 'import motorbridge; print("motorbridge OK")'
+python -c 'import pinocchio ; print("pinocchio OK")'
+python -c 'import reBotArm_control_py; print("reBotArm_control_py OK")'
+python -c 'import xensevr_pc_service_sdk; print("xense_vr_sdk OK")'
+
 ```
 
 安装脚本会以 editable 模式安装当前项目，因此修改本仓库源码后不需要重新安装 Python 包。
@@ -164,7 +186,9 @@ reBot 集成同样分为两层：
 | --- | --- | --- |
 | `--robot.sdk_path=...` | 自动检测 | 显式指定仓库内 reBot SDK 的路径。 |
 | `--robot.hw_yaml=...` | SDK 默认值 | 执行器层使用的硬件 YAML。 |
-| `--robot.arm_control_mode=posvel` | `posvel` | 机械臂模式；支持 `mit`、`posvel` 和 `pos_vel`。 |
+| `--robot.arm_control_mode=mit` | `mit` | 机械臂模式；默认使用 MIT 控制，也兼容显式指定 `posvel`/`pos_vel`。 |
+| `--robot.gravity_compensation_enabled=true` | `true` | MIT 模式下启用 Pinocchio 重力前馈。 |
+| `--robot.gravity_compensation_scale=1.0` | `1.0` | 重力补偿力矩倍率；首次调试可从 `0.5` 开始。 |
 | `--robot.joint_target_interpolation_time_s=0.03` | `0.03 s` | 关节目标平滑时间常数。 |
 | `--robot.feedback_max_age_s=0.5` | `0.5 s` | 缓存反馈过期告警阈值。 |
 | `--robot.start_position='[...]'` | 项目默认值 | 遥操作启动和按下 A 键时使用的六个机械臂关节加夹爪位置。 |

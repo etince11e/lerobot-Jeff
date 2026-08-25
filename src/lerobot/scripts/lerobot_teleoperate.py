@@ -382,15 +382,26 @@ def rebot_rs_pico4_teleop_loop(
     display_len = max(len(key) for key in robot.action_features)
     timer = CycleTimer(fps, records_data=False)
     start = time.perf_counter()
+    last_latency_log = time.monotonic()
+    last_action_log = last_latency_log
+    last_latency_log_counters = {"published": 0, "dropped": 0, "send_errors": 0}
+
+    def _fmt_latency(value, suffix: str = "ms") -> str:
+        if value is None:
+            return "n/a"
+        return f"{float(value):.1f}{suffix}"
 
     try:
         while True:
             timer.tick()
             loop_start = time.perf_counter()
 
+            observe_started = time.perf_counter()
             with timer.section("observe"):
                 obs = robot.get_observation()
+            observe_ms = (time.perf_counter() - observe_started) * 1e3
 
+            teleop_started = time.perf_counter()
             with timer.section("teleop"):
                 raw_action = teleop.get_action()
                 if teleop.get_reset_button():
@@ -417,10 +428,64 @@ def rebot_rs_pico4_teleop_loop(
                 teleop_action = teleop_action_processor((raw_action, obs))
                 robot_action_to_send = robot_action_processor((teleop_action, obs))
                 action_summary = " ".join(f"{k}={float(v):+.4f}" for k, v in robot_action_to_send.items())
+            teleop_ms = (time.perf_counter() - teleop_started) * 1e3
 
+            send_started = time.perf_counter()
             with timer.section("send"):
                 if not dryrun:
                     _ = robot.send_action(robot_action_to_send)
+            send_ms = (time.perf_counter() - send_started) * 1e3
+
+            # Print a compact diagnostic summary every 0.5 s rather than
+            # flooding the terminal at the teleoperation rate.
+            now = time.monotonic()
+            if now - last_latency_log >= 0.5:
+                pico_snapshot = getattr(teleop, "get_latency_snapshot", lambda: {})()
+                robot_snapshot = getattr(robot, "get_latency_snapshot", lambda: {})()
+                elapsed = now - last_latency_log
+                published = int(robot_snapshot.get("ik_published_total", 0) or 0)
+                dropped = int(robot_snapshot.get("ik_dropped_total", 0) or 0)
+                send_errors = int(robot_snapshot.get("can_send_errors", 0) or 0)
+                request_seq = robot_snapshot.get("ik_request_seq")
+                latest_seq = robot_snapshot.get("ik_latest_seq")
+                seq_lag = (
+                    int(latest_seq) - int(request_seq)
+                    if latest_seq is not None and request_seq is not None
+                    else "n/a"
+                )
+                logger.info(
+                    "[LATENCY] loop=%s observe=%s teleop=%s send=%s | "
+                    "PICO age=%s sdk=%s process=%s dup=%d | "
+                    "IK queue=%s solve=%s iter=%s seq=%s latest=%s lag=%s pub=%.1f/s drop=%.1f/s | "
+                    "control=%s qerr=%s | CAN send_err=%.1f/s feedback=%s cache=%s",
+                    _fmt_latency((time.perf_counter() - loop_start) * 1e3),
+                    _fmt_latency(observe_ms),
+                    _fmt_latency(teleop_ms),
+                    _fmt_latency(send_ms),
+                    _fmt_latency(pico_snapshot.get("pico_age_ms")),
+                    _fmt_latency(pico_snapshot.get("sdk_getters_ms")),
+                    _fmt_latency(pico_snapshot.get("processing_ms")),
+                    int(pico_snapshot.get("pico_duplicate_frames", 0) or 0),
+                    _fmt_latency(robot_snapshot.get("ik_queue_ms")),
+                    _fmt_latency(robot_snapshot.get("ik_solve_ms")),
+                    robot_snapshot.get("ik_iterations", "n/a"),
+                    request_seq if request_seq is not None else "n/a",
+                    latest_seq if latest_seq is not None else "n/a",
+                    seq_lag,
+                    (published - last_latency_log_counters["published"]) / elapsed,
+                    (dropped - last_latency_log_counters["dropped"]) / elapsed,
+                    _fmt_latency(robot_snapshot.get("control_callback_ms")),
+                    _fmt_latency(robot_snapshot.get("command_actual_error_rad"), "rad"),
+                    (send_errors - last_latency_log_counters["send_errors"]) / elapsed,
+                    _fmt_latency(robot_snapshot.get("can_feedback_last_sweep_ms")),
+                    _fmt_latency(robot_snapshot.get("can_feedback_cache_age_ms")),
+                )
+                last_latency_log = now
+                last_latency_log_counters = {
+                    "published": published,
+                    "dropped": dropped,
+                    "send_errors": send_errors,
+                }
 
             dashboard_lines: list[str] | None = None
             if display_data:
@@ -453,12 +518,14 @@ def rebot_rs_pico4_teleop_loop(
                 )
             else:
                 tag = "[DRYRUN] " if dryrun else ""
-                print(
-                    f"\r\033[K{tag}{loop_s * 1e3:5.2f}ms ({1 / loop_s:.0f} Hz) | {action_summary}",
-                    end="",
-                    flush=True,
-                )
-                move_cursor_up(1)
+                # Action values are useful for diagnosis, but printing them at
+                # the 30 Hz teleoperation cadence overwhelms the terminal.
+                # Keep the control loop unchanged and emit the latest values
+                # once per second.
+                now = time.monotonic()
+                if now - last_action_log >= 1.0:
+                    print(f"{tag}{loop_s * 1e3:5.2f}ms ({1 / loop_s:.0f} Hz) | {action_summary}", flush=True)
+                    last_action_log = now
 
             if duration is not None and time.perf_counter() - start >= duration:
                 return

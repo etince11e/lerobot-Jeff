@@ -149,6 +149,20 @@ class Pico4(Teleoperator):
         self._last_position_rate_warning_time: float = 0.0
         self._last_rotation_rate_warning_time: float = 0.0
 
+        # Lightweight timing diagnostics.  These values are updated once per
+        # get_action() call and read by the reBot RS teleoperation loop; they
+        # are intentionally snapshots rather than a per-frame log stream.
+        self._last_pico_timestamp_ns: int | None = None
+        self._pico_duplicate_frames: int = 0
+        self._pico_latency_snapshot: dict[str, float | int | None] = {
+            "sdk_getters_ms": None,
+            "processing_ms": None,
+            "get_action_ms": None,
+            "pico_age_ms": None,
+            "pico_timestamp_ns": None,
+            "pico_duplicate_frames": 0,
+        }
+
     @property
     def is_connected(self) -> bool:
         """Check if the Pico4 VR headset is connected."""
@@ -278,6 +292,8 @@ class Pico4(Teleoperator):
             self._was_enabled = False
             self._was_reset_button_pressed = False
             self._orientation_control_active = True
+            self._last_pico_timestamp_ns = None
+            self._pico_duplicate_frames = 0
 
             self._is_connected = True
             self.logger.info(f"{self} connected successfully.")
@@ -551,7 +567,10 @@ class Pico4(Teleoperator):
         if not self._is_connected or self._xrt is None:
             raise DeviceNotConnectedError(f"{self} is not connected.")
 
+        action_started = time.perf_counter()
+
         # Step 1: Get controller data from SDK (all data in one batch to minimize SDK calls)
+        sdk_started = time.perf_counter()
         if self.config.use_right_controller:
             pose = self._xrt.get_right_controller_pose()
             controller_grip = float(self._xrt.get_right_grip())
@@ -566,6 +585,28 @@ class Pico4(Teleoperator):
             self._last_y_button = bool(self._xrt.get_Y_button())
         else:
             raise RuntimeError("No controller configured")
+        sdk_getters_ms = (time.perf_counter() - sdk_started) * 1e3
+
+        # XenseVR exposes the source timestamp of the cached controller state.
+        # It is a wall-clock timestamp, so compare it with time.time_ns(), not
+        # the monotonic clock used for local durations.  Some older SDK builds
+        # do not expose this method; diagnostics remain available with age=None.
+        pico_timestamp_ns: int | None = None
+        get_timestamp_ns = getattr(self._xrt, "get_time_stamp_ns", None)
+        if callable(get_timestamp_ns):
+            try:
+                candidate = int(get_timestamp_ns())
+                if candidate > 0:
+                    pico_timestamp_ns = candidate
+                    if candidate == self._last_pico_timestamp_ns:
+                        self._pico_duplicate_frames += 1
+                    self._last_pico_timestamp_ns = candidate
+            except (TypeError, ValueError, RuntimeError):
+                pass
+        pico_age_ms = (
+            (time.time_ns() - pico_timestamp_ns) / 1e6 if pico_timestamp_ns is not None else None
+        )
+        processing_started = time.perf_counter()
         controller_pose_raw = np.array(pose, dtype=np.float32)  # [x, y, z, qx, qy, qz, qw] in Pico4 frame
         self._last_grip = controller_grip
 
@@ -794,6 +835,15 @@ class Pico4(Teleoperator):
             f"quat=[{self._target_quat[0]:.3f}, {self._target_quat[1]:.3f}, {self._target_quat[2]:.3f}, {self._target_quat[3]:.3f}], "
             f"gripper={self._target_gripper_pos:.3f}, enabled={self._enabled}, ori_active={self._orientation_control_active}"
         )
+        processing_ms = (time.perf_counter() - processing_started) * 1e3
+        self._pico_latency_snapshot = {
+            "sdk_getters_ms": sdk_getters_ms,
+            "processing_ms": processing_ms,
+            "get_action_ms": (time.perf_counter() - action_started) * 1e3,
+            "pico_age_ms": pico_age_ms,
+            "pico_timestamp_ns": pico_timestamp_ns,
+            "pico_duplicate_frames": self._pico_duplicate_frames,
+        }
         return {
             "tcp.x": self._target_pos[0],
             "tcp.y": self._target_pos[1],
@@ -806,6 +856,11 @@ class Pico4(Teleoperator):
             "tcp.r6": r6d[5],
             "gripper.pos": self._target_gripper_pos,
         }
+
+    def get_latency_snapshot(self) -> dict[str, float | int | None]:
+        """Return the latest PICO source-age and get_action timing snapshot."""
+
+        return dict(self._pico_latency_snapshot)
 
     def get_target_pose_array(self) -> tuple[np.ndarray, float]:
         """

@@ -15,7 +15,7 @@
 # limitations under the License.
 
 from contextlib import contextmanager
-from threading import Event
+from threading import Event, Lock
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -69,6 +69,48 @@ def test_cached_position_read_performs_no_motor_io():
     assert [motor.robstride_get_param_f32.call_count for motor in motors] == calls_after_refresh
 
 
+def test_mit_position_read_uses_type2_cache_without_mech_position_query():
+    motors = [MagicMock(), MagicMock()]
+    motors[0].get_state.return_value = {"pos": 0.25}
+    motors[1].get_state.return_value = {"pos": -0.5}
+    group = _robstride_group(*motors)
+    group._mode = "mit"
+
+    assert np.allclose(group.get_positions(request_feedback=False), [0.25, -0.5])
+    for motor in motors:
+        motor.robstride_get_param_f32.assert_not_called()
+        motor.get_state.assert_called_once_with()
+
+
+def test_mit_velocity_read_uses_type2_cache_without_feedback_request():
+    motors = [MagicMock(), MagicMock()]
+    motors[0].get_state.return_value = {"vel": 0.1}
+    motors[1].get_state.return_value = {"vel": -0.2}
+    group = _robstride_group(*motors)
+    group._mode = "mit"
+
+    assert np.allclose(group.get_velocities(request_feedback=False), [0.1, -0.2])
+    for motor in motors:
+        motor.request_feedback.assert_not_called()
+        motor.get_state.assert_called_once_with()
+
+
+def test_compare_cached_motor_state_to_mech_position():
+    motor = MagicMock()
+    motor.get_state.return_value = {"pos": 0.523}
+    motor.robstride_get_param_f32.return_value = 0.521
+    group = _robstride_group(motor)
+
+    result = group.compare_cached_state_to_mech_position("joint1", timeout_ms=100)
+
+    assert result["state"] == {"pos": 0.523}
+    assert result["type2_pos"] == 0.523
+    assert result["mech_pos"] == 0.521
+    assert np.isclose(result["diff"], 0.002)
+    motor.get_state.assert_called_once_with()
+    motor.robstride_get_param_f32.assert_called_once_with(0x7019, 100)
+
+
 def test_failed_sweep_keeps_previous_cache_and_timestamp():
     motors = [MagicMock(), MagicMock()]
     motors[0].robstride_get_param_f32.side_effect = [0.1, 0.3]
@@ -118,6 +160,10 @@ def test_background_feedback_loop_refreshes_and_stops():
     arm._feedback_stop_event = Event()
     arm._feedback_thread = None
     arm._feedback_error_reported = set()
+    arm._diagnostics_lock = Lock()
+    arm._feedback_last_sweep_ms = None
+    arm._feedback_sweep_count = 0
+    arm._feedback_sweep_error_count = 0
 
     arm.start_feedback_loop()
     assert refreshed.wait(timeout=1.0)
@@ -125,3 +171,34 @@ def test_background_feedback_loop_refreshes_and_stops():
 
     arm.stop_feedback_loop()
     assert not arm.feedback_loop_active
+
+
+def test_control_loop_can_skip_periodic_feedback_sweep():
+    arm = RebotArm.__new__(RebotArm)
+    arm._running = False
+    arm._ctrl_thread = None
+    arm._ctrl_fn = None
+    arm._rate = 100.0
+    arm._ctrl_rate = 100.0
+    arm._feedback_running = False
+    arm._feedback_stop_event = Event()
+    arm._feedback_thread = None
+
+    started = Event()
+    release = Event()
+
+    arm.start_feedback_loop = MagicMock()
+
+    def control_loop_stub():
+        started.set()
+        release.wait(timeout=1.0)
+
+    arm._control_loop_impl = control_loop_stub
+
+    arm.start_control_loop(lambda *_: None, feedback_sweep=False)
+
+    arm.start_feedback_loop.assert_not_called()
+    assert started.wait(timeout=1.0)
+    assert arm.control_loop_active
+    release.set()
+    arm.stop_control_loop()

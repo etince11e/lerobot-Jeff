@@ -59,13 +59,30 @@ sudo apt install -y build-essential git git-lfs iproute2 can-utils
 
 ## Environment Installation
 
-Clone the repository using its new name:
+Clone the repository and initialize both SDK submodules:
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USER/lerobot-Jeff.git
+git clone --recurse-submodules https://github.com/YOUR_GITHUB_USER/lerobot-Jeff.git
 cd lerobot-Jeff
 git lfs install
 git lfs pull
+```
+
+This repository keeps the reBot and XenseVR SDK sources as Git submodules:
+
+- `third_party/reBotArm_control_py` — reBot arm SDK.
+- `third_party/XenseVR-PC-Service` — XenseVR PC service and native SDK.
+
+If you cloned the repository without `--recurse-submodules`, initialize the SDK directories before running the installation script:
+
+```bash
+git submodule update --init --recursive
+```
+
+You can verify that both submodules are checked out with:
+
+```bash
+git submodule status
 ```
 
 Create a Python 3.12 environment with Mamba:
@@ -164,7 +181,9 @@ Important reBot options:
 | --- | --- | --- |
 | `--robot.sdk_path=...` | auto-detect | Explicit path to the bundled reBot SDK. |
 | `--robot.hw_yaml=...` | SDK default | Hardware YAML used by the actuator layer. |
-| `--robot.arm_control_mode=posvel` | `posvel` | Arm mode; `mit`, `posvel`, and `pos_vel` are accepted. |
+| `--robot.arm_control_mode=mit` | `mit` | Arm mode; MIT is the default, with explicit `posvel`/`pos_vel` compatibility. |
+| `--robot.gravity_compensation_enabled=true` | `true` | Enable Pinocchio gravity feed-forward in MIT mode. |
+| `--robot.gravity_compensation_scale=1.0` | `1.0` | Gravity torque multiplier; start with `0.5` during initial tuning. |
 | `--robot.joint_target_interpolation_time_s=0.03` | `0.03 s` | Joint-target smoothing time constant. |
 | `--robot.feedback_max_age_s=0.5` | `0.5 s` | Threshold for stale cached feedback warnings. |
 | `--robot.start_position='[...]'` | project default | Six arm joints plus gripper used at teleoperation start and by the A button. |

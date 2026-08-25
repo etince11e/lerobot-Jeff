@@ -61,6 +61,9 @@ def _try_import_rebotarm_sdk():
         solve_ik=importlib.import_module("reBotArm_control_py.kinematics").solve_ik,
         pos_rot_to_se3=importlib.import_module("reBotArm_control_py.kinematics").pos_rot_to_se3,
         IKParams=importlib.import_module("reBotArm_control_py.kinematics.inverse_kinematics").IKParams,
+        compute_generalized_gravity=importlib.import_module(
+            "reBotArm_control_py.dynamics"
+        ).compute_generalized_gravity,
     )
 
 
@@ -134,6 +137,7 @@ class RebotRSFollower(Robot):
         self._has_gripper = False
         self._model = None
         self._data = None
+        self._dynamics_data = None
         self._end_frame_id: int | None = None
         self._arm_joint_names = [f"joint{i}" for i in range(1, 7)]
         # ``_q_target`` is the newest successfully solved IK goal (updated by
@@ -154,6 +158,7 @@ class RebotRSFollower(Robot):
         # teleoperation rate.
         self._ik_condition = threading.Condition()
         self._ik_request: tuple[int, int, object] | None = None
+        self._ik_request_times: dict[int, float] = {}
         self._ik_request_seq = 0
         self._ik_epoch = 0
         self._ik_stop_requested = False
@@ -165,9 +170,20 @@ class RebotRSFollower(Robot):
         self._last_ik_duration_s: float | None = None
         self._ik_dropped_results = 0
         self._ik_dropped_epoch_results = 0
+        self._latency_lock = threading.Lock()
+        self._ik_last_queue_ms: float | None = None
+        self._ik_last_iterations: int | None = None
+        self._ik_last_seq: int | None = None
+        self._ik_last_latest_seq: int | None = None
+        self._ik_published_results = 0
+        self._control_callback_ms: float | None = None
+        self._last_command_actual_error_rad: float | None = None
         self._camera_max_age_ms = 500
         self._stale_camera_warnings: set[str] = set()
         self._stale_feedback_warnings: set[str] = set()
+        self._gravity_warning_logged = False
+        self._position_compare_stop_event = threading.Event()
+        self._position_compare_thread: threading.Thread | None = None
 
     @property
     def _arm_mode(self) -> str:
@@ -210,6 +226,15 @@ class RebotRSFollower(Robot):
         self._gripper_group = self._arm.groups.get("gripper")
         if self._arm_group is None:
             raise ValueError("reBotArm_control_py hardware config must define an 'arm' group.")
+        if (
+            self.config.position_compare_enabled
+            and self.config.position_compare_motor_name not in self._arm_group.joint_names
+        ):
+            raise ValueError(
+                "position_compare_motor_name must name a joint in the arm group; "
+                f"got {self.config.position_compare_motor_name!r}, "
+                f"available={self._arm_group.joint_names}"
+            )
 
         if self.config.hw_yaml is not None:
             logger.warning(
@@ -219,6 +244,10 @@ class RebotRSFollower(Robot):
         self._model = self._sdk.load_robot_model()
         self._end_frame_id = self._sdk.get_end_effector_frame_id(self._model)
         self._data = self._model.createData()
+        # IK and gravity computation run in different threads. Pinocchio Data
+        # is mutable, so the control loop must use its own Data instance.
+        self._dynamics_data = self._model.createData()
+        self._gravity_warning_logged = False
 
         self._arm.connect()
         if self._arm_mode == "mit":
@@ -247,12 +276,72 @@ class RebotRSFollower(Robot):
             gripper_pos = self._gripper_group.get_positions()[0]
             self._gripper_target = float(gripper_pos)
 
-        self._arm.start_control_loop(self._loop_cb)
+        # MIT Type-2 responses update MotorBridge's per-motor RX cache. Do not
+        # start the periodic 0x7019 feedback sweep in that mode: it competes
+        # with the control frames and creates a low-frequency position step.
+        # POS_VEL keeps the legacy sweep until its response semantics are
+        # verified separately.
+        self._arm.start_control_loop(
+            self._loop_cb,
+            rate=self.config.control_rate_hz,
+            feedback_sweep=self._arm_mode != "mit",
+        )
         for camera in self.cameras.values():
             camera.connect()
         self._connected = True
         self._start_ik_worker()
+        self._start_position_compare_diagnostic()
         logger.info("%s connected with %s.", self, self.config.hw_yaml or "SDK default hardware YAML")
+
+    def _start_position_compare_diagnostic(self) -> None:
+        """Start the opt-in low-rate Type-2 versus mechPos diagnostic."""
+
+        if not self.config.position_compare_enabled or self._arm_group is None:
+            return
+        self._position_compare_stop_event.clear()
+        self._position_compare_thread = threading.Thread(
+            target=self._position_compare_loop,
+            name="rebot-rs-position-compare",
+            daemon=True,
+        )
+        self._position_compare_thread.start()
+
+    def _position_compare_loop(self) -> None:
+        interval = self.config.position_compare_interval_s
+        motor_name = self.config.position_compare_motor_name
+        while not self._position_compare_stop_event.wait(interval):
+            group = self._arm_group
+            if group is None:
+                return
+            try:
+                result = group.compare_cached_state_to_mech_position(
+                    motor_name,
+                    timeout_ms=self.config.position_compare_timeout_ms,
+                )
+                if result.get("error") is not None:
+                    logger.warning("[POS_COMPARE] %s: %s", motor_name, result["error"])
+                elif result["type2_pos"] is None:
+                    logger.warning("[POS_COMPARE] %s: no cached MotorBridge state", motor_name)
+                else:
+                    logger.info(
+                        "[POS_COMPARE] %s state=%r type2=%+.6f rad mechPos=%+.6f rad "
+                        "diff=%+.6f rad query=%.1f ms",
+                        motor_name,
+                        result["state"],
+                        result["type2_pos"],
+                        result["mech_pos"],
+                        result["diff"],
+                        result.get("query_ms", float("nan")),
+                    )
+            except Exception:
+                logger.exception("[POS_COMPARE] %s comparison failed", motor_name)
+
+    def _stop_position_compare_diagnostic(self) -> None:
+        self._position_compare_stop_event.set()
+        thread = self._position_compare_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
+        self._position_compare_thread = None
 
     def configure(self) -> None:
         if not self.is_connected:
@@ -345,15 +434,57 @@ class RebotRSFollower(Robot):
     def _loop_cb(self, _, dt: float) -> None:
         if self._arm_group is None:
             return
+        callback_started = time.perf_counter()
         q_command = self._interpolated_command()
         if self._arm_mode == "mit":
-            self._arm_group.send_mit(q_command)
+            tau = None
+            if self.config.gravity_compensation_enabled and self._dynamics_data is not None:
+                try:
+                    q_actual = self._arm_group.get_positions(request_feedback=False)
+                    q_full = self._sdk.pad_q_for_model(self._model, q_actual, len(q_actual))
+                    tau = self._sdk.compute_generalized_gravity(
+                        self._model,
+                        q_full,
+                        self._dynamics_data,
+                    )[: self._arm_group.num_joints]
+                    tau = np.asarray(tau, dtype=np.float64) * self.config.gravity_compensation_scale
+                except Exception:
+                    if not self._gravity_warning_logged:
+                        logger.exception("reBot RS gravity compensation failed; sending zero feed-forward torque.")
+                        self._gravity_warning_logged = True
+            self._arm_group.send_mit(q_command, tau=tau)
         else:
             self._arm_group.send_pos_vel(q_command)
         if self._has_gripper and self._gripper_group is not None:
             with self._target_lock:
                 gripper_target = self._gripper_target
             self._gripper_group.send_mit(np.array([gripper_target], dtype=np.float64))
+        with self._latency_lock:
+            self._control_callback_ms = (time.perf_counter() - callback_started) * 1e3
+
+    def get_latency_snapshot(self) -> dict[str, float | int | None]:
+        """Return the latest IK/control/CAN diagnostic values."""
+
+        with self._latency_lock:
+            snapshot: dict[str, float | int | None] = {
+                "ik_queue_ms": self._ik_last_queue_ms,
+                "ik_solve_ms": self._last_ik_duration_s * 1e3
+                if self._last_ik_duration_s is not None
+                else None,
+                "ik_iterations": self._ik_last_iterations,
+                "ik_request_seq": self._ik_last_seq,
+                "ik_latest_seq": self._ik_last_latest_seq,
+                "ik_published_total": self._ik_published_results,
+                "ik_dropped_total": self._ik_dropped_results,
+                "control_callback_ms": self._control_callback_ms,
+                "command_actual_error_rad": self._last_command_actual_error_rad,
+            }
+
+        if self._arm is not None:
+            diagnostics = getattr(self._arm, "get_diagnostics_snapshot", None)
+            if callable(diagnostics):
+                snapshot.update({f"can_{key}": value for key, value in diagnostics().items()})
+        return snapshot
 
     def _start_ik_worker(self) -> None:
         """Start the single latest-target IK worker after hardware is ready."""
@@ -377,6 +508,7 @@ class RebotRSFollower(Robot):
         with self._ik_condition:
             self._ik_stop_requested = True
             self._ik_request = None
+            self._ik_request_times.clear()
             self._ik_epoch += 1
             self._ik_request_seq += 1
             self._ik_condition.notify_all()
@@ -398,6 +530,7 @@ class RebotRSFollower(Robot):
 
         with self._ik_condition:
             self._ik_request = None
+            self._ik_request_times.clear()
             self._ik_epoch += 1
             self._ik_request_seq += 1
 
@@ -410,12 +543,13 @@ class RebotRSFollower(Robot):
                     self._ik_condition.wait()
                 if self._ik_stop_requested:
                     return
-                _request_seq, request_epoch, target = self._ik_request
+                request_seq, request_epoch, target = self._ik_request
                 self._ik_request = None
+                submitted_at = self._ik_request_times.pop(request_seq, None)
 
             # Pinocchio ``Data`` is worker-owned.  The worker seed is updated
-            # after every successful same-epoch solve, even when a newer hand
-            # request is already waiting in the mailbox.
+            # after every successful result that is published; the lifecycle
+            # epoch remains the only invalidation boundary.
             with self._target_lock:
                 q_seed = self._ik_worker_seed.copy()
                 arm_group = self._arm_group
@@ -434,7 +568,12 @@ class RebotRSFollower(Robot):
                 step_size=self.config.ik_step_size,
                 damping=self.config.ik_damping,
             )
-            started = time.monotonic()
+            solve_started = time.perf_counter()
+            queue_ms = (
+                max(0.0, (solve_started - submitted_at) * 1e3)
+                if submitted_at is not None
+                else 0.0
+            )
             try:
                 result = sdk.solve_ik(
                     model,
@@ -446,24 +585,41 @@ class RebotRSFollower(Robot):
                     controlled_joints=arm_group.num_joints,
                 )
             except Exception:
-                self._last_ik_duration_s = time.monotonic() - started
+                self._last_ik_duration_s = time.perf_counter() - solve_started
+                with self._ik_condition:
+                    latest_seq = self._ik_request_seq
+                with self._latency_lock:
+                    self._ik_last_queue_ms = queue_ms
+                    self._ik_last_iterations = None
+                    self._ik_last_seq = request_seq
+                    self._ik_last_latest_seq = latest_seq
                 if self._connected:
                     logger.exception("reBot RS asynchronous IK failed with an exception.")
                 continue
-            self._last_ik_duration_s = time.monotonic() - started
+            self._last_ik_duration_s = time.perf_counter() - solve_started
 
             if result.success:
                 q_goal = np.asarray(result.q[: arm_group.num_joints], dtype=np.float64).copy()
                 if not np.all(np.isfinite(q_goal)):
                     logger.warning("reBot RS asynchronous IK returned non-finite joint targets.")
                     self._last_ik_success = False
+                    with self._ik_condition:
+                        latest_seq = self._ik_request_seq
+                    with self._latency_lock:
+                        self._ik_last_queue_ms = queue_ms
+                        self._ik_last_iterations = getattr(result, "iterations", None)
+                        self._ik_last_seq = request_seq
+                        self._ik_last_latest_seq = latest_seq
                     continue
 
                 # A newer request in the same epoch does not invalidate this
-                # completed result: publish it first, then solve the newest
-                # mailbox entry.  Only a lifecycle epoch change invalidates a
-                # result (for example homing or reset).
+                # completed result.  The mailbox is already latest-only, so
+                # publishing this result prevents starvation when solve time
+                # is longer than one teleoperation frame.  Only a lifecycle
+                # epoch change invalidates a result (for example homing or
+                # reset).
                 with self._ik_condition:
+                    latest_seq = self._ik_request_seq
                     if request_epoch != self._ik_epoch:
                         self._ik_dropped_results += 1
                         self._ik_dropped_epoch_results += 1
@@ -473,12 +629,24 @@ class RebotRSFollower(Robot):
                         self._q_seed = q_goal.copy()
                         self._ik_worker_seed = q_goal.copy()
                 self._last_ik_success = True
+                with self._latency_lock:
+                    self._ik_last_queue_ms = queue_ms
+                    self._ik_last_iterations = getattr(result, "iterations", None)
+                    self._ik_last_seq = request_seq
+                    self._ik_last_latest_seq = latest_seq
+                    self._ik_published_results += 1
             else:
                 with self._ik_condition:
+                    latest_seq = self._ik_request_seq
                     if request_epoch != self._ik_epoch:
                         self._ik_dropped_results += 1
                         self._ik_dropped_epoch_results += 1
                         continue
+                with self._latency_lock:
+                    self._ik_last_queue_ms = queue_ms
+                    self._ik_last_iterations = getattr(result, "iterations", None)
+                    self._ik_last_seq = request_seq
+                    self._ik_last_latest_seq = latest_seq
                 if self._last_ik_success:
                     logger.warning(
                         "reBot RS asynchronous IK failed; holding previous joint target. err=%.3e",
@@ -539,6 +707,12 @@ class RebotRSFollower(Robot):
 
     def _collect_observation(self) -> RobotObservation:
         q = self._read_arm_positions(request_feedback=False)
+        with self._target_lock:
+            q_command = self._q_command.copy()
+        with self._latency_lock:
+            self._last_command_actual_error_rad = (
+                float(np.max(np.abs(q_command[: len(q)] - q))) if len(q) else None
+            )
         q_padded = self._sdk.pad_q_for_model(self._model, q, len(q))
         tcp_pos, _, _ = self._sdk.compute_fk(self._model, q_padded)
 
@@ -736,7 +910,11 @@ class RebotRSFollower(Robot):
         # Do not solve IK on the teleoperation thread.  Replace the mailbox
         # contents so a slow solve can never make old hand poses accumulate.
         with self._ik_condition:
+            previous_request = self._ik_request
             self._ik_request_seq += 1
+            if previous_request is not None:
+                self._ik_request_times.pop(previous_request[0], None)
+            self._ik_request_times[self._ik_request_seq] = time.perf_counter()
             self._ik_request = (self._ik_request_seq, self._ik_epoch, target)
             self._ik_condition.notify()
         with self._target_lock:
@@ -753,6 +931,8 @@ class RebotRSFollower(Robot):
 
         arm = self._arm
         self._connected = False
+
+        self._stop_position_compare_diagnostic()
 
         # Stop asynchronous IK before releasing the model/data or actuator
         # resources it may be using.
@@ -788,4 +968,5 @@ class RebotRSFollower(Robot):
         self._arm = None
         self._arm_group = None
         self._gripper_group = None
+        self._dynamics_data = None
         logger.info("%s disconnected.", self)
