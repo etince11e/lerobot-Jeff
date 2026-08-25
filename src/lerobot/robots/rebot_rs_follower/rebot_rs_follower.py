@@ -89,7 +89,11 @@ def _load_rebotarm_sdk(configured_path: Path | None):
         for path in _candidate_sdk_paths(configured_path):
             if not path.exists():
                 continue
-            import_root = path.parent if path.name == "reBotArm_control_py" and (path / "__init__.py").exists() else path
+            import_root = (
+                path.parent
+                if path.name == "reBotArm_control_py" and (path / "__init__.py").exists()
+                else path
+            )
             path_str = str(import_root)
             if path_str not in sys.path:
                 sys.path.insert(0, path_str)
@@ -202,11 +206,15 @@ class RebotRSFollower(Robot):
 
     @cached_property
     def action_features(self) -> dict[str, type]:
-        return {key: float for key in TCP_ACTION_KEYS}
+        return dict.fromkeys(TCP_ACTION_KEYS, float)
 
     @property
     def is_connected(self) -> bool:
-        return self._connected and self._arm is not None and all(cam.is_connected for cam in self.cameras.values())
+        return (
+            self._connected
+            and self._arm is not None
+            and all(cam.is_connected for cam in self.cameras.values())
+        )
 
     @property
     def is_calibrated(self) -> bool:
@@ -450,7 +458,9 @@ class RebotRSFollower(Robot):
                     tau = np.asarray(tau, dtype=np.float64) * self.config.gravity_compensation_scale
                 except Exception:
                     if not self._gravity_warning_logged:
-                        logger.exception("reBot RS gravity compensation failed; sending zero feed-forward torque.")
+                        logger.exception(
+                            "reBot RS gravity compensation failed; sending zero feed-forward torque."
+                        )
                         self._gravity_warning_logged = True
             self._arm_group.send_mit(q_command, tau=tau)
         else:
@@ -569,11 +579,7 @@ class RebotRSFollower(Robot):
                 damping=self.config.ik_damping,
             )
             solve_started = time.perf_counter()
-            queue_ms = (
-                max(0.0, (solve_started - submitted_at) * 1e3)
-                if submitted_at is not None
-                else 0.0
-            )
+            queue_ms = max(0.0, (solve_started - submitted_at) * 1e3) if submitted_at is not None else 0.0
             try:
                 result = sdk.solve_ik(
                     model,
@@ -676,7 +682,11 @@ class RebotRSFollower(Robot):
         frame = None
         timestamp = None
         try:
-            if hasattr(camera, "frame_lock") and hasattr(camera, "latest_frame") and hasattr(camera, "latest_timestamp"):
+            if (
+                hasattr(camera, "frame_lock")
+                and hasattr(camera, "latest_frame")
+                and hasattr(camera, "latest_timestamp")
+            ):
                 with camera.frame_lock:
                     frame = camera.latest_frame
                     timestamp = camera.latest_timestamp
@@ -862,7 +872,9 @@ class RebotRSFollower(Robot):
         """Move the arm back to the mechanical zero pose before shutdown."""
 
         home = np.asarray(self.config.home_position[:6], dtype=np.float64)
-        gripper_target = float(self.config.gripper_open_pos) if open_gripper else float(self.config.home_position[6])
+        gripper_target = (
+            float(self.config.gripper_open_pos) if open_gripper else float(self.config.home_position[6])
+        )
         self._move_to_joint_target(
             home,
             label="mechanical home",

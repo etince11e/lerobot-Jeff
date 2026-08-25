@@ -135,7 +135,6 @@ from lerobot.utils.visualization_utils import (
     shutdown_visualization,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -589,9 +588,7 @@ def _cleanup_teleoperate_session(
     """
 
     robot_resources = (
-        _rebot_rs_resources_present(robot)
-        if special_rebot_rs_pico4
-        else _device_is_connected(robot)
+        _rebot_rs_resources_present(robot) if special_rebot_rs_pico4 else _device_is_connected(robot)
     )
 
     if special_rebot_rs_pico4 and robot_resources and not dryrun:

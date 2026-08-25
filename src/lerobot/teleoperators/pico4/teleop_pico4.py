@@ -603,9 +603,7 @@ class Pico4(Teleoperator):
                     self._last_pico_timestamp_ns = candidate
             except (TypeError, ValueError, RuntimeError):
                 pass
-        pico_age_ms = (
-            (time.time_ns() - pico_timestamp_ns) / 1e6 if pico_timestamp_ns is not None else None
-        )
+        pico_age_ms = (time.time_ns() - pico_timestamp_ns) / 1e6 if pico_timestamp_ns is not None else None
         processing_started = time.perf_counter()
         controller_pose_raw = np.array(pose, dtype=np.float32)  # [x, y, z, qx, qy, qz, qw] in Pico4 frame
         self._last_grip = controller_grip
@@ -792,7 +790,7 @@ class Pico4(Teleoperator):
                     if delta_norm > max_delta:
                         if now - self._last_position_rate_warning_time >= 1.0:
                             self.logger.warning(
-                                f"[RATE_LIMIT] Position velocity {delta_norm/dt:.2f} m/s "
+                                f"[RATE_LIMIT] Position velocity {delta_norm / dt:.2f} m/s "
                                 f"exceeds limit {self.config.max_pos_velocity} m/s, clamping."
                             )
                             self._last_position_rate_warning_time = now
@@ -807,7 +805,7 @@ class Pico4(Teleoperator):
                     if angle > max_angle:
                         if now - self._last_rotation_rate_warning_time >= 1.0:
                             self.logger.warning(
-                                f"[RATE_LIMIT] Rotation velocity {np.degrees(angle/dt):.1f} deg/s "
+                                f"[RATE_LIMIT] Rotation velocity {np.degrees(angle / dt):.1f} deg/s "
                                 f"exceeds limit {np.degrees(self.config.max_rot_velocity):.1f} deg/s, clamping."
                             )
                             self._last_rotation_rate_warning_time = now
@@ -941,7 +939,7 @@ class Pico4(Teleoperator):
         if self._is_connected:
             try:
                 self.disconnect()
-            except Exception:
+            except Exception:  # nosec B110 - destructors must not raise during interpreter teardown
                 pass
             finally:
                 self._is_connected = False

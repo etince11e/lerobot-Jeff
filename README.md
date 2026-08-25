@@ -133,26 +133,26 @@ The `Pico4` teleoperator then:
 
 Default controller mapping:
 
-| Input | Behavior |
-| --- | --- |
-| Right grip | Hold to enable TCP motion; release to freeze the current target pose. |
-| Right trigger | Controls the gripper; released is open and fully pressed is closed. |
-| A button | Returns reBot to the configured start pose and synchronizes the PICO target again. |
-| Controller position | Controls relative TCP translation while grip is held. |
-| Controller orientation | Controls TCP orientation while grip is held. |
+| Input                  | Behavior                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| Right grip             | Hold to enable TCP motion; release to freeze the current target pose.              |
+| Right trigger          | Controls the gripper; released is open and fully pressed is closed.                |
+| A button               | Returns reBot to the configured start pose and synchronizes the PICO target again. |
+| Controller position    | Controls relative TCP translation while grip is held.                              |
+| Controller orientation | Controls TCP orientation while grip is held.                                       |
 
 Useful PICO CLI options:
 
-| Option | Default | Description |
-| --- | ---: | --- |
-| `--teleop.use_right_controller=true` | `true` | Use the right controller. |
+| Option                                                                  |        Default | Description                                                      |
+| ----------------------------------------------------------------------- | -------------: | ---------------------------------------------------------------- |
+| `--teleop.use_right_controller=true`                                    |         `true` | Use the right controller.                                        |
 | `--teleop.use_left_controller=true --teleop.use_right_controller=false` | `false / true` | Use the left controller instead of the default right controller. |
-| `--teleop.pos_sensitivity=1.0` | `1.0` | Scale controller translation. |
-| `--teleop.ori_sensitivity=1.0` | `1.0` | Scale controller rotation. |
-| `--teleop.filter_window_size=1` | `1` | Moving-average filter window. |
-| `--teleop.position_jump_threshold=0.1` | `0.1 m` | Reject larger single-frame tracking jumps. |
-| `--teleop.max_pos_velocity=2.0` | `2.0 m/s` | Limit output translation velocity. |
-| `--teleop.max_rot_velocity=6.28` | `6.28 rad/s` | Limit output angular velocity. |
+| `--teleop.pos_sensitivity=1.0`                                          |          `1.0` | Scale controller translation.                                    |
+| `--teleop.ori_sensitivity=1.0`                                          |          `1.0` | Scale controller rotation.                                       |
+| `--teleop.filter_window_size=1`                                         |            `1` | Moving-average filter window.                                    |
+| `--teleop.position_jump_threshold=0.1`                                  |        `0.1 m` | Reject larger single-frame tracking jumps.                       |
+| `--teleop.max_pos_velocity=2.0`                                         |      `2.0 m/s` | Limit output translation velocity.                               |
+| `--teleop.max_rot_velocity=6.28`                                        |   `6.28 rad/s` | Limit output angular velocity.                                   |
 
 The PICO coordinate origin is established when the headset tracking application starts. Restarting that application creates a new origin. The robot target is synchronized from the arm's current TCP pose when teleoperation starts and whenever the A-button start action completes.
 
@@ -177,17 +177,17 @@ During teleoperation, the adapter:
 
 Important reBot options:
 
-| Option | Default | Description |
-| --- | --- | --- |
-| `--robot.sdk_path=...` | auto-detect | Explicit path to the bundled reBot SDK. |
-| `--robot.hw_yaml=...` | SDK default | Hardware YAML used by the actuator layer. |
-| `--robot.arm_control_mode=mit` | `mit` | Arm mode; MIT is the default, with explicit `posvel`/`pos_vel` compatibility. |
-| `--robot.gravity_compensation_enabled=true` | `true` | Enable Pinocchio gravity feed-forward in MIT mode. |
-| `--robot.gravity_compensation_scale=1.0` | `1.0` | Gravity torque multiplier; start with `0.5` during initial tuning. |
-| `--robot.joint_target_interpolation_time_s=0.03` | `0.03 s` | Joint-target smoothing time constant. |
-| `--robot.feedback_max_age_s=0.5` | `0.5 s` | Threshold for stale cached feedback warnings. |
-| `--robot.start_position='[...]'` | project default | Six arm joints plus gripper used at teleoperation start and by the A button. |
-| `--robot.home_position='[...]'` | all zeros | Six arm joints plus gripper used during normal shutdown. |
+| Option                                           | Default         | Description                                                                   |
+| ------------------------------------------------ | --------------- | ----------------------------------------------------------------------------- |
+| `--robot.sdk_path=...`                           | auto-detect     | Explicit path to the bundled reBot SDK.                                       |
+| `--robot.hw_yaml=...`                            | SDK default     | Hardware YAML used by the actuator layer.                                     |
+| `--robot.arm_control_mode=mit`                   | `mit`           | Arm mode; MIT is the default, with explicit `posvel`/`pos_vel` compatibility. |
+| `--robot.gravity_compensation_enabled=true`      | `true`          | Enable Pinocchio gravity feed-forward in MIT mode.                            |
+| `--robot.gravity_compensation_scale=1.0`         | `1.0`           | Gravity torque multiplier; start with `0.5` during initial tuning.            |
+| `--robot.joint_target_interpolation_time_s=0.03` | `0.03 s`        | Joint-target smoothing time constant.                                         |
+| `--robot.feedback_max_age_s=0.5`                 | `0.5 s`         | Threshold for stale cached feedback warnings.                                 |
+| `--robot.start_position='[...]'`                 | project default | Six arm joints plus gripper used at teleoperation start and by the A button.  |
+| `--robot.home_position='[...]'`                  | all zeros       | Six arm joints plus gripper used during normal shutdown.                      |
 
 The default reBot RS hardware configuration uses `can0`, six RobStride arm motors, and one RobStride gripper motor.
 

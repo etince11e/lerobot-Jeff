@@ -14,8 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
 import math
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from lerobot.cameras import CameraConfig, Cv2Backends
@@ -111,7 +111,7 @@ class RebotRSFollowerConfig:
     )
     wrist_camera: CameraConfig | None = field(
         default_factory=lambda: OpenCVCameraConfig(
-            index_or_path=Path("/dev/video4"),
+            index_or_path=Path("/dev/video2"),
             width=640,
             height=480,
             fps=30,
@@ -130,20 +130,20 @@ class RebotRSFollowerConfig:
                 f"start_position must have 7 elements (J1..J6 + gripper), got {len(self.start_position)}"
             )
         if len(self.home_position) != 7:
-            raise ValueError(f"home_position must have 7 elements (J1..J6 + gripper), got {len(self.home_position)}")
+            raise ValueError(
+                f"home_position must have 7 elements (J1..J6 + gripper), got {len(self.home_position)}"
+            )
         if self.feedback_max_age_s <= 0:
             raise ValueError(f"feedback_max_age_s must be positive, got {self.feedback_max_age_s}")
         if not self.position_compare_motor_name:
             raise ValueError("position_compare_motor_name must not be empty")
         if not math.isfinite(self.position_compare_interval_s) or self.position_compare_interval_s <= 0:
             raise ValueError(
-                "position_compare_interval_s must be positive, "
-                f"got {self.position_compare_interval_s}"
+                f"position_compare_interval_s must be positive, got {self.position_compare_interval_s}"
             )
         if self.position_compare_timeout_ms <= 0:
             raise ValueError(
-                "position_compare_timeout_ms must be positive, "
-                f"got {self.position_compare_timeout_ms}"
+                f"position_compare_timeout_ms must be positive, got {self.position_compare_timeout_ms}"
             )
         if not math.isfinite(self.gravity_compensation_scale) or self.gravity_compensation_scale < 0:
             raise ValueError(
@@ -169,7 +169,14 @@ class RebotRSFollowerConfig:
 @RobotConfig.register_subclass("rebot_rs_follower")
 @dataclass
 class RebotRSFollowerRobotConfig(RobotConfig, RebotRSFollowerConfig):
-    """Registered configuration for the reBot RS follower robot."""
+    """Registered configuration for the reBot RS follower robot.
+
+    This follower does not perform LeRobot motor calibration itself
+    (``is_calibrated`` is always true); complete any required actuator
+    calibration and SDK hardware setup before the first run. The inherited
+    ``calibration_dir`` option is retained for the common robot-config
+    interface and is not used by this implementation.
+    """
 
     def __post_init__(self):
         RebotRSFollowerConfig.__post_init__(self)

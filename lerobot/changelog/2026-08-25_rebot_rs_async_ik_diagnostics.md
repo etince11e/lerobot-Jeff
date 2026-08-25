@@ -74,17 +74,17 @@ IK worker 使用自己的 Pinocchio `Data`。MIT 重力计算另建独立 dynami
 
 新增或完善 `get_latency_snapshot()`，记录：
 
-| 指标 | 含义 |
-|---|---|
-| `ik_queue_ms` | 请求进入 mailbox 到开始求解的时间 |
-| `ik_solve_ms` | 最近一次 IK 求解耗时 |
-| `ik_iterations` | 最近一次求解迭代次数 |
-| `ik_request_seq` / `ik_latest_seq` | 当前和最新请求序号 |
-| `ik_published_total` | 已发布有效 IK 结果总数 |
-| `ik_dropped_total` | 被丢弃的 IK 结果总数 |
-| `control_callback_ms` | 控制回调执行耗时 |
-| `command_actual_error_rad` | 发送命令与实际位置的最大关节误差 |
-| `can_* ` | SDK 提供的发送错误、feedback sweep 和 cache 诊断 |
+| 指标                               | 含义                                             |
+| ---------------------------------- | ------------------------------------------------ |
+| `ik_queue_ms`                      | 请求进入 mailbox 到开始求解的时间                |
+| `ik_solve_ms`                      | 最近一次 IK 求解耗时                             |
+| `ik_iterations`                    | 最近一次求解迭代次数                             |
+| `ik_request_seq` / `ik_latest_seq` | 当前和最新请求序号                               |
+| `ik_published_total`               | 已发布有效 IK 结果总数                           |
+| `ik_dropped_total`                 | 被丢弃的 IK 结果总数                             |
+| `control_callback_ms`              | 控制回调执行耗时                                 |
+| `command_actual_error_rad`         | 发送命令与实际位置的最大关节误差                 |
+| `can_* `                           | SDK 提供的发送错误、feedback sweep 和 cache 诊断 |
 
 Pico4 + reBot RS teleoperation loop 每约 0.5 秒输出一次这些指标，用于判断是 Pico 输入延迟、IK 排队、控制回调超时还是 CAN 错误造成的运动不连续。
 

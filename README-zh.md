@@ -138,26 +138,26 @@ PICO 集成分为两层：
 
 默认手柄映射：
 
-| 输入 | 行为 |
-| --- | --- |
-| 右手柄抓握键 | 按住时允许 TCP 运动；松开后保持当前目标位姿。 |
-| 右手柄扳机键 | 控制夹爪；松开为打开，完全按下为闭合。 |
-| A 键 | 让 reBot 返回配置的起始位，并重新同步 PICO 目标。 |
-| 手柄位置 | 抓握键按住时控制 TCP 相对平移。 |
-| 手柄姿态 | 抓握键按住时控制 TCP 姿态。 |
+| 输入         | 行为                                              |
+| ------------ | ------------------------------------------------- |
+| 右手柄抓握键 | 按住时允许 TCP 运动；松开后保持当前目标位姿。     |
+| 右手柄扳机键 | 控制夹爪；松开为打开，完全按下为闭合。            |
+| A 键         | 让 reBot 返回配置的起始位，并重新同步 PICO 目标。 |
+| 手柄位置     | 抓握键按住时控制 TCP 相对平移。                   |
+| 手柄姿态     | 抓握键按住时控制 TCP 姿态。                       |
 
 常用 PICO 命令行参数：
 
-| 参数 | 默认值 | 说明 |
-| --- | ---: | --- |
-| `--teleop.use_right_controller=true` | `true` | 使用右手柄。 |
+| 参数                                                                    |         默认值 | 说明                             |
+| ----------------------------------------------------------------------- | -------------: | -------------------------------- |
+| `--teleop.use_right_controller=true`                                    |         `true` | 使用右手柄。                     |
 | `--teleop.use_left_controller=true --teleop.use_right_controller=false` | `false / true` | 改用左手柄，并关闭默认的右手柄。 |
-| `--teleop.pos_sensitivity=1.0` | `1.0` | 缩放手柄平移量。 |
-| `--teleop.ori_sensitivity=1.0` | `1.0` | 缩放手柄旋转量。 |
-| `--teleop.filter_window_size=1` | `1` | 移动平均滤波窗口。 |
-| `--teleop.position_jump_threshold=0.1` | `0.1 m` | 拒绝超过阈值的单帧追踪跳变。 |
-| `--teleop.max_pos_velocity=2.0` | `2.0 m/s` | 限制输出平移速度。 |
-| `--teleop.max_rot_velocity=6.28` | `6.28 rad/s` | 限制输出角速度。 |
+| `--teleop.pos_sensitivity=1.0`                                          |          `1.0` | 缩放手柄平移量。                 |
+| `--teleop.ori_sensitivity=1.0`                                          |          `1.0` | 缩放手柄旋转量。                 |
+| `--teleop.filter_window_size=1`                                         |            `1` | 移动平均滤波窗口。               |
+| `--teleop.position_jump_threshold=0.1`                                  |        `0.1 m` | 拒绝超过阈值的单帧追踪跳变。     |
+| `--teleop.max_pos_velocity=2.0`                                         |      `2.0 m/s` | 限制输出平移速度。               |
+| `--teleop.max_rot_velocity=6.28`                                        |   `6.28 rad/s` | 限制输出角速度。                 |
 
 PICO 坐标原点在头显追踪应用启动时建立。重启该应用会产生新的坐标原点。遥操作启动时，以及 A 键回到起始位完成后，机器人目标都会根据机械臂当前 TCP 位姿重新同步。
 
@@ -182,17 +182,17 @@ reBot 集成同样分为两层：
 
 重要的 reBot 参数：
 
-| 参数 | 默认值 | 说明 |
-| --- | --- | --- |
-| `--robot.sdk_path=...` | 自动检测 | 显式指定仓库内 reBot SDK 的路径。 |
-| `--robot.hw_yaml=...` | SDK 默认值 | 执行器层使用的硬件 YAML。 |
-| `--robot.arm_control_mode=mit` | `mit` | 机械臂模式；默认使用 MIT 控制，也兼容显式指定 `posvel`/`pos_vel`。 |
-| `--robot.gravity_compensation_enabled=true` | `true` | MIT 模式下启用 Pinocchio 重力前馈。 |
-| `--robot.gravity_compensation_scale=1.0` | `1.0` | 重力补偿力矩倍率；首次调试可从 `0.5` 开始。 |
-| `--robot.joint_target_interpolation_time_s=0.03` | `0.03 s` | 关节目标平滑时间常数。 |
-| `--robot.feedback_max_age_s=0.5` | `0.5 s` | 缓存反馈过期告警阈值。 |
-| `--robot.start_position='[...]'` | 项目默认值 | 遥操作启动和按下 A 键时使用的六个机械臂关节加夹爪位置。 |
-| `--robot.home_position='[...]'` | 全零 | 正常退出时使用的六个机械臂关节加夹爪位置。 |
+| 参数                                             | 默认值     | 说明                                                               |
+| ------------------------------------------------ | ---------- | ------------------------------------------------------------------ |
+| `--robot.sdk_path=...`                           | 自动检测   | 显式指定仓库内 reBot SDK 的路径。                                  |
+| `--robot.hw_yaml=...`                            | SDK 默认值 | 执行器层使用的硬件 YAML。                                          |
+| `--robot.arm_control_mode=mit`                   | `mit`      | 机械臂模式；默认使用 MIT 控制，也兼容显式指定 `posvel`/`pos_vel`。 |
+| `--robot.gravity_compensation_enabled=true`      | `true`     | MIT 模式下启用 Pinocchio 重力前馈。                                |
+| `--robot.gravity_compensation_scale=1.0`         | `1.0`      | 重力补偿力矩倍率；首次调试可从 `0.5` 开始。                        |
+| `--robot.joint_target_interpolation_time_s=0.03` | `0.03 s`   | 关节目标平滑时间常数。                                             |
+| `--robot.feedback_max_age_s=0.5`                 | `0.5 s`    | 缓存反馈过期告警阈值。                                             |
+| `--robot.start_position='[...]'`                 | 项目默认值 | 遥操作启动和按下 A 键时使用的六个机械臂关节加夹爪位置。            |
+| `--robot.home_position='[...]'`                  | 全零       | 正常退出时使用的六个机械臂关节加夹爪位置。                         |
 
 默认 reBot RS 硬件配置使用 `can0`、六个 RobStride 机械臂电机和一个 RobStride 夹爪电机。
 

@@ -4,7 +4,7 @@
 
 Streaming video encoding eliminates the traditional PNG round-trip during video dataset recording. Instead of:
 
-1. Capture frame -> write PNG to disk -> (at recording finalization) read PNGs -> encode to MP4 -> delete PNGs
+1. Capture frame -> write PNG to disk -> (at recording finalization) read PNG files -> encode to MP4 -> delete PNG files
 
 Frames can be encoded in real-time during capture:
 
@@ -14,15 +14,15 @@ This makes `save_episode()` near-instant (the video is already encoded by the ti
 
 ## 2. Tuning Parameters
 
-| Parameter                   | CLI Flag                              | Type          | Default       | Description                                                                  |
-| --------------------------- | ------------------------------------- | ------------- | ------------- | ---------------------------------------------------------------------------- |
-| `streaming_encoding`        | `--dataset.streaming_encoding`        | `bool`        | `False`       | Enable real-time encoding during capture                                     |
-| `video_encoding_batch_size` | `--dataset.video_encoding_batch_size` | `int`         | `0`           | `0` stages frames and encodes all pending episodes when recording finalizes |
-| `vcodec`                    | `--dataset.rgb_encoder.vcodec`        | `str`         | `"h264"`      | Video codec. `"auto"` detects the best available hardware encoder           |
-| `crf`                       | `--dataset.rgb_encoder.crf`           | `int \| float` | `23`          | H.264 quality level; lower values increase quality and file size             |
-| `preset`                    | `--dataset.rgb_encoder.preset`        | `int \| str`  | `"ultrafast"` | Codec speed/quality preset                                                    |
-| `encoder_threads`           | `--dataset.encoder_threads`           | `int \| None` | `None` (auto) | Threads per encoder instance. `None` leaves the codec to decide              |
-| `encoder_queue_maxsize`     | `--dataset.encoder_queue_maxsize`     | `int`         | `30`          | Max buffered frames per camera (~1s at 30fps). Consumes RAM                  |
+| Parameter                   | CLI Flag                              | Type           | Default       | Description                                                                 |
+| --------------------------- | ------------------------------------- | -------------- | ------------- | --------------------------------------------------------------------------- |
+| `streaming_encoding`        | `--dataset.streaming_encoding`        | `bool`         | `False`       | Enable real-time encoding during capture                                    |
+| `video_encoding_batch_size` | `--dataset.video_encoding_batch_size` | `int`          | `0`           | `0` stages frames and encodes all pending episodes when recording finalizes |
+| `vcodec`                    | `--dataset.rgb_encoder.vcodec`        | `str`          | `"h264"`      | Video codec. `"auto"` detects the best available hardware encoder           |
+| `crf`                       | `--dataset.rgb_encoder.crf`           | `int \| float` | `23`          | H.264 quality level; lower values increase quality and file size            |
+| `preset`                    | `--dataset.rgb_encoder.preset`        | `int \| str`   | `"ultrafast"` | Codec speed/quality preset                                                  |
+| `encoder_threads`           | `--dataset.encoder_threads`           | `int \| None`  | `None` (auto) | Threads per encoder instance. `None` leaves the codec to decide             |
+| `encoder_queue_maxsize`     | `--dataset.encoder_queue_maxsize`     | `int`          | `30`          | Max buffered frames per camera (~1s at 30fps). Consumes RAM                 |
 
 ## 3. Performance Considerations
 
@@ -77,11 +77,11 @@ Use HW encoding when:
 
 ### Choosing a Codec
 
-| Codec                 | CPU Usage | File Size      | Quality | Notes                                                            |
-| --------------------- | --------- | -------------- | ------- | ---------------------------------------------------------------- |
-| `libsvtav1`           | High      | Smallest       | Best    | Best compression but most CPU-intensive                          |
-| `h264` (default)      | Low       | ~30-50% larger | Good    | Software H.264 with the `ultrafast` recording preset              |
-| HW encoders           | Very Low  | Largest        | Good    | Offloads to dedicated hardware. Best for CPU-constrained systems |
+| Codec            | CPU Usage | File Size      | Quality | Notes                                                            |
+| ---------------- | --------- | -------------- | ------- | ---------------------------------------------------------------- |
+| `libsvtav1`      | High      | Smallest       | Best    | Best compression but most CPU-intensive                          |
+| `h264` (default) | Low       | ~30-50% larger | Good    | Software H.264 with the `ultrafast` recording preset             |
+| HW encoders      | Very Low  | Largest        | Good    | Offloads to dedicated hardware. Best for CPU-constrained systems |
 
 ### Available HW Encoders
 

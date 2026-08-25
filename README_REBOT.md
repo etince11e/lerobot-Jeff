@@ -1,6 +1,7 @@
 # reBot RS + Pico4 Environment Setup / 环境安装
 
 ## 中文
+
 这是给 `rebot_rs_follower` + `pico4` 遥操作单独准备的环境安装流程。
 
 ### 依赖
@@ -53,6 +54,7 @@ lerobot-teleoperate \
 - 脚本按仓库根目录解析相对路径，整个项目换位置通常不会冲突。
 
 ## English
+
 This is a dedicated setup flow for `rebot_rs_follower` + `pico4` teleoperation.
 
 ### Requirements

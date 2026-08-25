@@ -280,9 +280,7 @@ class BiPico4(Teleoperator):
             self._xrt = None
             raise DeviceNotConnectedError(f"Failed to connect BiPico4: {e}") from e
 
-    def _init_pico4_instance(
-        self, pico4: Pico4, xrt, tcp_pose_quat: np.ndarray
-    ) -> None:
+    def _init_pico4_instance(self, pico4: Pico4, xrt, tcp_pose_quat: np.ndarray) -> None:
         """Inject shared xrt handle and seed initial pose into a Pico4 instance.
 
         This mirrors what Pico4.connect() does after xrt.init(), so we avoid
@@ -407,7 +405,7 @@ class BiPico4(Teleoperator):
         if self._is_connected:
             try:
                 self.disconnect()
-            except Exception:
+            except Exception:  # nosec B110 - destructors must not raise during interpreter teardown
                 pass
             finally:
                 self._is_connected = False

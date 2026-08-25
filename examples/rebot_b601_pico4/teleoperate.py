@@ -123,9 +123,7 @@ def _build_rebot_action(
     action["wrist_roll"] = joint_anchor.get("wrist_roll", 0.0) + euler_delta[0] * mapping.wrist_deg_per_rad
     action["wrist_flex"] = joint_anchor.get("wrist_flex", 0.0) + euler_delta[1] * mapping.wrist_deg_per_rad
     action["wrist_yaw"] = joint_anchor.get("wrist_yaw", 0.0) + euler_delta[2] * mapping.wrist_deg_per_rad
-    action["gripper"] = _rebot_gripper_from_pico(
-        float(pico_action["gripper.pos"]), mapping.gripper_close_deg
-    )
+    action["gripper"] = _rebot_gripper_from_pico(float(pico_action["gripper.pos"]), mapping.gripper_close_deg)
 
     return {f"{joint}.pos": value for joint, value in action.items()}
 

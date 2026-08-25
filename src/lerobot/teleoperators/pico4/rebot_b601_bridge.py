@@ -61,12 +61,24 @@ class RebotB601PicoTeleopSession:
         pos_delta = self._pico_xyz(pico_action) - self.pico_pos_anchor
         euler_delta = self._pico_euler(pico_action) - self.pico_euler_anchor
 
-        action["shoulder_pan"] = self.joint_anchor.get("shoulder_pan", 0.0) + pos_delta[1] * self.mapping.pan_deg_per_m
-        action["shoulder_lift"] = self.joint_anchor.get("shoulder_lift", 0.0) + pos_delta[2] * self.mapping.lift_deg_per_m
-        action["elbow_flex"] = self.joint_anchor.get("elbow_flex", 0.0) + pos_delta[0] * self.mapping.elbow_deg_per_m
-        action["wrist_roll"] = self.joint_anchor.get("wrist_roll", 0.0) + euler_delta[0] * self.mapping.wrist_deg_per_rad
-        action["wrist_flex"] = self.joint_anchor.get("wrist_flex", 0.0) + euler_delta[1] * self.mapping.wrist_deg_per_rad
-        action["wrist_yaw"] = self.joint_anchor.get("wrist_yaw", 0.0) + euler_delta[2] * self.mapping.wrist_deg_per_rad
+        action["shoulder_pan"] = (
+            self.joint_anchor.get("shoulder_pan", 0.0) + pos_delta[1] * self.mapping.pan_deg_per_m
+        )
+        action["shoulder_lift"] = (
+            self.joint_anchor.get("shoulder_lift", 0.0) + pos_delta[2] * self.mapping.lift_deg_per_m
+        )
+        action["elbow_flex"] = (
+            self.joint_anchor.get("elbow_flex", 0.0) + pos_delta[0] * self.mapping.elbow_deg_per_m
+        )
+        action["wrist_roll"] = (
+            self.joint_anchor.get("wrist_roll", 0.0) + euler_delta[0] * self.mapping.wrist_deg_per_rad
+        )
+        action["wrist_flex"] = (
+            self.joint_anchor.get("wrist_flex", 0.0) + euler_delta[1] * self.mapping.wrist_deg_per_rad
+        )
+        action["wrist_yaw"] = (
+            self.joint_anchor.get("wrist_yaw", 0.0) + euler_delta[2] * self.mapping.wrist_deg_per_rad
+        )
         action["gripper"] = self.rebot_gripper_from_pico(
             float(pico_action["gripper.pos"]), self.mapping.gripper_close_deg
         )

@@ -44,14 +44,14 @@ MIT command
 
 为避免直接假定两种角度天然一致，先对 J1 进行了低频实机比较。采集到的 35 个样本结果为：
 
-| 指标 | 结果 |
-| --- | ---: |
-| 平均绝对差值 | 约 `0.000195 rad` |
-| 最大绝对差值 | `0.001749 rad`，约 `0.10°` |
-| 超过 `0.0005 rad` 的样本 | 1 / 35 |
-| 单次 `0x7019` 查询平均耗时 | 约 `21.5 ms` |
-| 单次查询常见耗时 | 约 `8.1–8.8 ms` |
-| 单次查询最大耗时 | `102.3 ms` |
+| 指标                       |                       结果 |
+| -------------------------- | -------------------------: |
+| 平均绝对差值               |          约 `0.000195 rad` |
+| 最大绝对差值               | `0.001749 rad`，约 `0.10°` |
+| 超过 `0.0005 rad` 的样本   |                     1 / 35 |
+| 单次 `0x7019` 查询平均耗时 |               约 `21.5 ms` |
+| 单次查询常见耗时           |            约 `8.1–8.8 ms` |
+| 单次查询最大耗时           |                 `102.3 ms` |
 
 J1 样本没有出现持续固定 offset、方向相反或约 `2π` 的跳变。运动中的一次较大差值可由两条数据并非在完全相同时间采样解释；当前证据支持 J1 的 Type-2 position 与 `mechPos` 使用相同单位和方向。
 
@@ -76,12 +76,12 @@ MIT follower 启动控制循环时传入 `feedback_sweep=False`，因此正常�
 
 [config_rebot_rs_follower.py](../../src/lerobot/robots/rebot_rs_follower/config_rebot_rs_follower.py#L72) 新增以下 opt-in 诊断参数：
 
-| 参数 | 默认值 | 用途 |
-| --- | --- | --- |
-| `position_compare_enabled` | `false` | 是否启动 Type-2 与 `mechPos` 对比线程 |
-| `position_compare_motor_name` | `joint1` | 每次只比较一个指定关节 |
-| `position_compare_interval_s` | `1.0` | 比较周期，单位秒 |
-| `position_compare_timeout_ms` | `100` | 单次 `0x7019` 查询超时 |
+| 参数                          | 默认值   | 用途                                  |
+| ----------------------------- | -------- | ------------------------------------- |
+| `position_compare_enabled`    | `false`  | 是否启动 Type-2 与 `mechPos` 对比线程 |
+| `position_compare_motor_name` | `joint1` | 每次只比较一个指定关节                |
+| `position_compare_interval_s` | `1.0`    | 比较周期，单位秒                      |
+| `position_compare_timeout_ms` | `100`    | 单次 `0x7019` 查询超时                |
 
 配置初始化会验证电机名非空、比较周期为有限正数、查询超时为正数。连接硬件后还会确认目标电机属于 arm group。
 

@@ -178,11 +178,13 @@ class Pico4TrackerReader:
 
         # Cached state, guarded by _pose_lock and produced by _poller_thread.
         self._pose_lock = threading.Lock()
-        self._latest_raw_wxyz: np.ndarray | None = None   # [x,y,z,qw,qx,qy,qz]
-        self._latest_ee_wxyz: np.ndarray | None = None    # [x,y,z,qw,qx,qy,qz] after rigid + (optional align) + hemisphere
-        self._latest_ts: float | None = None              # time.monotonic() of latest valid pose
-        self._stale_warned: bool = False                  # gate stale-pose warning to once per drop-out
-        self._missing_warned_at: float = 0.0              # throttle missing-SN warning
+        self._latest_raw_wxyz: np.ndarray | None = None  # [x,y,z,qw,qx,qy,qz]
+        self._latest_ee_wxyz: np.ndarray | None = (
+            None  # [x,y,z,qw,qx,qy,qz] after rigid + (optional align) + hemisphere
+        )
+        self._latest_ts: float | None = None  # time.monotonic() of latest valid pose
+        self._stale_warned: bool = False  # gate stale-pose warning to once per drop-out
+        self._missing_warned_at: float = 0.0  # throttle missing-SN warning
 
         # UMI-style frame alignment state. _ee_init_matrix is set by
         # connect() when the caller passes current_tcp_pose_quat;
@@ -236,8 +238,7 @@ class Pico4TrackerReader:
             ee_init = np.asarray(current_tcp_pose_quat, dtype=np.float64)
             if ee_init.shape != (7,):
                 raise ValueError(
-                    f"current_tcp_pose_quat must be shape (7,) [x,y,z,qw,qx,qy,qz], "
-                    f"got {ee_init.shape}"
+                    f"current_tcp_pose_quat must be shape (7,) [x,y,z,qw,qx,qy,qz], got {ee_init.shape}"
                 )
             self._ee_init_matrix = quaternion_to_matrix(ee_init, input_format="wxyz")
             self.logger.info(
@@ -329,10 +330,7 @@ class Pico4TrackerReader:
                 self._resolved_sn = sns[idx]
                 return
 
-        raise ValueError(
-            f"Tracker SN {self.tracker_sn!r} not found. "
-            f"Available SNs: {sns[:n_trackers]!r}."
-        )
+        raise ValueError(f"Tracker SN {self.tracker_sn!r} not found. Available SNs: {sns[:n_trackers]!r}.")
 
     def disconnect(self) -> None:
         """Stop the poller thread and mark the reader disconnected.
@@ -402,8 +400,7 @@ class Pico4TrackerReader:
             raw_xyzw = np.asarray(poses[idx], dtype=np.float64)
             # Reorder xyzw → wxyz so downstream utilities (all wxyz) match.
             raw_wxyz = np.array(
-                [raw_xyzw[0], raw_xyzw[1], raw_xyzw[2],
-                 raw_xyzw[6], raw_xyzw[3], raw_xyzw[4], raw_xyzw[5]],
+                [raw_xyzw[0], raw_xyzw[1], raw_xyzw[2], raw_xyzw[6], raw_xyzw[3], raw_xyzw[4], raw_xyzw[5]],
                 dtype=np.float64,
             )
 
@@ -418,10 +415,7 @@ class Pico4TrackerReader:
             #   T_world_ee_aligned = T_align @ T_world_ee_raw
             if self._ee_init_matrix is not None and self._align_matrix is None:
                 self._align_matrix = self._ee_init_matrix @ np.linalg.inv(t_world_ee)
-                self.logger.info(
-                    "UMI alignment latched: subsequent poses are in the "
-                    "caller-supplied frame."
-                )
+                self.logger.info("UMI alignment latched: subsequent poses are in the caller-supplied frame.")
             if self._align_matrix is not None:
                 t_world_ee = self._align_matrix @ t_world_ee
 
@@ -456,8 +450,7 @@ class Pico4TrackerReader:
             if sn == self.tracker_sn:
                 if idx != self._tracker_index:
                     self.logger.info(
-                        f"Tracker SN {self.tracker_sn!r} index shifted "
-                        f"{self._tracker_index} -> {idx}"
+                        f"Tracker SN {self.tracker_sn!r} index shifted {self._tracker_index} -> {idx}"
                     )
                     self._tracker_index = idx
                 return idx
@@ -505,8 +498,7 @@ class Pico4TrackerReader:
             if age > STALE_WARN_THRESHOLD_S and not self._stale_warned:
                 self._stale_warned = True
                 self.logger.warning(
-                    f"Pose stale by {age:.2f}s — tracker may have dropped out. "
-                    "Returning last-known pose."
+                    f"Pose stale by {age:.2f}s — tracker may have dropped out. Returning last-known pose."
                 )
             return self._latest_ee_wxyz.copy()
 
@@ -564,10 +556,7 @@ def _smoke_test() -> None:
             raw = reader.get_pose_raw()
             ee = reader.get_pose_ee()
             if raw is not None:
-                print(
-                    f"[{i:03d}] raw xyz={raw[:3]} wxyz={raw[3:]} "
-                    f"ee xyz={ee[:3]} wxyz={ee[3:]}"
-                )
+                print(f"[{i:03d}] raw xyz={raw[:3]} wxyz={raw[3:]} ee xyz={ee[:3]} wxyz={ee[3:]}")
             else:
                 print(f"[{i:03d}] (no pose yet)")
             time.sleep(0.1)

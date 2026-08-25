@@ -14,8 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from threading import Event, Lock
 import time
+from threading import Event, Lock
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -30,7 +30,7 @@ def test_camera_aliases_land_in_observation_features():
     assert "head" in robot.config.cameras
     assert "wrist" in robot.config.cameras
     assert str(robot.config.head_camera.index_or_path) == "/dev/video5"
-    assert str(robot.config.wrist_camera.index_or_path) == "/dev/video4"
+    assert str(robot.config.wrist_camera.index_or_path) == "/dev/video2"
     assert robot.config.head_camera.fourcc == "MJPG"
     assert robot.config.wrist_camera.fourcc == "MJPG"
     assert robot.config.start_position == [0.0163, 0.6469, 0.5653, -0.5734, 0.0225, 0.0290, 4.7]
@@ -50,12 +50,14 @@ def test_start_pose_and_safe_home_use_distinct_targets():
     robot._gripper_target = 0.2
     robot.cameras = {}
 
-    readings = iter([
-        np.full(6, 0.4, dtype=np.float64),
-        np.array(robot.config.start_position[:6], dtype=np.float64),
-        np.full(6, 0.2, dtype=np.float64),
-        np.array(robot.config.home_position[:6], dtype=np.float64),
-    ])
+    readings = iter(
+        [
+            np.full(6, 0.4, dtype=np.float64),
+            np.array(robot.config.start_position[:6], dtype=np.float64),
+            np.full(6, 0.2, dtype=np.float64),
+            np.array(robot.config.home_position[:6], dtype=np.float64),
+        ]
+    )
     robot._read_arm_positions = MagicMock(
         side_effect=lambda *_, **__: next(readings, np.zeros(6, dtype=np.float64))
     )
@@ -78,7 +80,9 @@ def test_get_observation_uses_camera_latest_buffer_without_reading_camera():
     robot._arm_group = MagicMock(num_joints=6)
     robot._sdk.pad_q_for_model.side_effect = lambda _model, q, _n: np.asarray(q)
     robot._sdk.compute_fk.return_value = (np.array([0.3, 0.2, 0.1], dtype=np.float64), None, None)
-    robot._read_arm_positions = MagicMock(return_value=np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=np.float64))
+    robot._read_arm_positions = MagicMock(
+        return_value=np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=np.float64)
+    )
     robot._read_gripper_position = MagicMock(return_value=0.75)
 
     head_camera = MagicMock()
@@ -208,7 +212,7 @@ def test_send_action_only_submits_ik_request():
     robot._sdk = MagicMock()
     robot._sdk.pos_rot_to_se3.return_value = "target"
 
-    action = {key: 0.0 for key in robot.action_features}
+    action = dict.fromkeys(robot.action_features, 0.0)
     action["tcp.r1"] = 1.0
     action["tcp.r5"] = 1.0
 

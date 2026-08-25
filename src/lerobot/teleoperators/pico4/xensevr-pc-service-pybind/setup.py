@@ -4,8 +4,8 @@ import re
 import shutil  # Added for shutil.rmtree
 import subprocess
 import sys
-from distutils.version import LooseVersion
 
+from distutils.version import LooseVersion
 from setuptools import Command, Extension, find_packages, setup  # Added Command
 from setuptools.command.build_ext import build_ext
 
@@ -19,17 +19,15 @@ class CMakeExtension(Extension):
 class CMakeBuild(build_ext):
     def run(self):
         try:
-            out = subprocess.check_output(["cmake", "--version"])
-        except OSError:
+            out = subprocess.check_output(["cmake", "--version"])  # nosec B607 - cmake is a required build tool
+        except OSError as err:
             raise RuntimeError(
                 "CMake must be installed to build the following extensions: "
                 + ", ".join(e.name for e in self.extensions)
-            )
+            ) from err
 
         if platform.system() == "Windows":
-            cmake_version = LooseVersion(
-                re.search(r"version\s*([\d.]+)", out.decode()).group(1)
-            )
+            cmake_version = LooseVersion(re.search(r"version\s*([\d.]+)", out.decode()).group(1))
             if cmake_version < "3.1.0":
                 raise RuntimeError("CMake >= 3.1.0 is required on Windows")
 
@@ -53,9 +51,7 @@ class CMakeBuild(build_ext):
         build_args = ["--config", cfg]
 
         if platform.system() == "Windows":
-            cmake_args += [
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{}={}".format(cfg.upper(), extdir)
-            ]
+            cmake_args += [f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}"]
             if sys.maxsize > 2**32:
                 cmake_args += ["-A", "x64"]
             build_args += ["--", "/m"]
@@ -70,12 +66,8 @@ class CMakeBuild(build_ext):
         if not os.path.exists(self.build_temp):
             os.makedirs(self.build_temp)
 
-        subprocess.check_call(
-            ["cmake", ext.sourcedir] + cmake_args, cwd=self.build_temp, env=env
-        )
-        subprocess.check_call(
-            ["cmake", "--build", "."] + build_args, cwd=self.build_temp
-        )
+        subprocess.check_call(["cmake", ext.sourcedir] + cmake_args, cwd=self.build_temp, env=env)
+        subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=self.build_temp)
 
 
 # New Clean Command
@@ -126,19 +118,13 @@ class UninstallCommand(Command):
         package_name = self.distribution.get_name()
         print(f"Attempting to uninstall {package_name}...")
         try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "uninstall", "-y", package_name]
-            )
+            subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", package_name])
             print(f"{package_name} uninstalled successfully.")
         except subprocess.CalledProcessError as e:
-            print(
-                f"Failed to uninstall {package_name}. It may not be installed or pip uninstall failed."
-            )
+            print(f"Failed to uninstall {package_name}. It may not be installed or pip uninstall failed.")
             print(f"Error: {e}")
         except FileNotFoundError:
-            print(
-                "pip command not found. Please ensure pip is installed and in your PATH."
-            )
+            print("pip command not found. Please ensure pip is installed and in your PATH.")
 
 
 setup(
@@ -149,11 +135,11 @@ setup(
     description="A Python binding for XenseVR PC Service SDK using pybind11 and CMake",
     long_description="",  # Optionally, load from a README.md file
     ext_modules=[CMakeExtension("xensevr_pc_service_sdk")],
-    cmdclass=dict(
-        build_ext=CMakeBuild,
-        clean=CleanCommand,  # Add clean command
-        uninstall=UninstallCommand,  # Add uninstall command
-    ),
+    cmdclass={
+        "build_ext": CMakeBuild,
+        "clean": CleanCommand,  # Add clean command
+        "uninstall": UninstallCommand,  # Add uninstall command
+    },
     zip_safe=False,
     python_requires=">=3.10",  # Specify your Python version requirement
     packages=find_packages(),  # If you have other Python packages in your project

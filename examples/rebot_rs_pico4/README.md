@@ -1,10 +1,12 @@
 # reBot RS + Pico4
 
 ## 中文
+
 这个示例把 `pico4` 遥操作接到 `rebot_rs_follower`，并使用
 `lerobot/third_party/reBotArm_control_py` 里的 IK / 控制栈。
 
 ### 安装
+
 要求：
 
 - 你已经激活 `lerobot-xense` 环境，且其中的 Python 是 3.12
@@ -95,10 +97,12 @@ observation 保存关节位置、夹爪位置、TCP 位置以及已配置的相�
 - 脚本默认会从当前 `lerobot` 仓库根目录解析路径，所以整个项目文件夹搬到新位置通常不会冲突。
 
 ## English
+
 This example connects `pico4` teleoperation to `rebot_rs_follower` and uses the
 IK / control stack from `lerobot/third_party/reBotArm_control_py`.
 
 ### Install
+
 Requirements:
 
 - your `lerobot-xense` environment is already activated and uses Python 3.12
