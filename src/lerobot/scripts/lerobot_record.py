@@ -129,6 +129,7 @@ from lerobot.robots import (  # noqa: F401
     openarm_follower,
     reachy2,
     rebot_b601_follower,
+    rebot_rs_follower,
     so_follower,
     unitree_g1 as unitree_g1_robot,
 )
@@ -198,6 +199,79 @@ class RecordConfig:
                 "Use --teleop.type=... to specify one. "
                 "For policy-based deployment, use lerobot-rollout instead."
             )
+
+
+def _is_rebot_rs_pico4(robot: Robot, teleop: Teleoperator | None) -> bool:
+    return robot.name == "rebot_rs_follower" and teleop is not None and teleop.name == "pico4"
+
+
+def _sync_rebot_rs_pico4(teleop: Teleoperator, robot: Robot) -> None:
+    """Seed Pico4's absolute target from the reBot RS pose."""
+
+    current_pose = robot.get_current_tcp_pose_quat()
+    teleop.reset_to_pose(current_pose[:7], float(current_pose[7]))
+
+
+def _reset_rebot_rs_pico4(teleop: Teleoperator, robot: Robot) -> None:
+    """Return reBot RS to its recording start pose and re-anchor Pico4."""
+
+    robot.reset_to_initial_position()
+    _sync_rebot_rs_pico4(teleop, robot)
+    logging.info("Pico4 A button: reBot RS returned to the recording start pose.")
+
+
+def _connect_record_devices(robot: Robot, teleop: Teleoperator | None) -> None:
+    """Connect a recording rig, applying the Pico4 + reBot RS startup sequence."""
+
+    if _is_rebot_rs_pico4(robot, teleop):
+        # Gate actuator power on a working Pico connection, then use the same
+        # homing/start sequence as lerobot-teleoperate before seeding Pico's
+        # absolute Cartesian target from the actual robot pose.
+        teleop.connect()
+        robot.connect()
+        robot.safe_home()
+        robot.go_to_start_position()
+        _sync_rebot_rs_pico4(teleop, robot)
+        return
+
+    if teleop is not None:
+        teleop.connect()
+    robot.connect()
+
+
+def _rebot_rs_resources_present(robot: Robot) -> bool:
+    """Return whether a reBot RS instance may still own actuator resources."""
+
+    try:
+        connected = bool(robot.is_connected)
+    except Exception:
+        connected = False
+    return connected or getattr(robot, "_arm", None) is not None
+
+
+def _cleanup_record_devices(robot: Robot, teleop: Teleoperator | None) -> None:
+    """Best-effort shutdown, homing reBot RS before disabling its drives."""
+
+    special_rebot_rs_pico4 = _is_rebot_rs_pico4(robot, teleop)
+    robot_resources = _rebot_rs_resources_present(robot) if special_rebot_rs_pico4 else robot.is_connected
+
+    if special_rebot_rs_pico4 and robot_resources:
+        try:
+            robot.safe_home()
+        except Exception as exc:
+            logging.warning("Failed to home reBot RS before recording shutdown: %s", exc)
+
+    if teleop is not None and teleop.is_connected:
+        try:
+            teleop.disconnect()
+        except Exception as exc:
+            logging.warning("Failed to disconnect teleoperator cleanly: %s", exc)
+
+    if robot_resources:
+        try:
+            robot.disconnect()
+        except Exception as exc:
+            logging.warning("Failed to disconnect robot cleanly: %s", exc)
 
 
 """ --------------- record_loop() data flow --------------------------
@@ -316,6 +390,11 @@ def record_loop(
             # Get action from teleop
             if isinstance(teleop, Teleoperator):
                 act = teleop.get_action()
+                if _is_rebot_rs_pico4(robot, teleop) and teleop.get_reset_button():
+                    _reset_rebot_rs_pico4(teleop, robot)
+                    timer.wait()
+                    timestamp = time.perf_counter() - start_episode_t
+                    continue
                 if robot.name == "unitree_g1":
                     teleop.send_feedback(obs)
 
@@ -479,11 +558,9 @@ def record(
                 encoder_queue_maxsize=cfg.dataset.encoder_queue_maxsize,
             )
 
-        # Connect the teleoperator before the robot so the robot isn't left idle (and possibly
-        # tripping a firmware watchdog) during teleop init. Matches lerobot_teleoperate.py.
-        if teleop is not None:
-            teleop.connect()
-        robot.connect()
+        # Pico4 + reBot RS needs its Cartesian target seeded from the actual
+        # start pose. Other rigs retain the normal teleop-first startup order.
+        _connect_record_devices(robot, teleop)
 
         listener, events = init_keyboard_listener()
 
@@ -563,10 +640,7 @@ def record(
         if dataset:
             dataset.finalize()
 
-        if robot.is_connected:
-            robot.disconnect()
-        if teleop and teleop.is_connected:
-            teleop.disconnect()
+        _cleanup_record_devices(robot, teleop)
 
         if listener is not None:
             listener.stop()

@@ -26,7 +26,14 @@ from lerobot.configs.dataset import DatasetRecordConfig
 from lerobot.processor import make_default_processors
 from lerobot.robots import make_robot_from_config
 from lerobot.scripts.lerobot_calibrate import CalibrateConfig, calibrate
-from lerobot.scripts.lerobot_record import RecordConfig, record, record_loop
+from lerobot.scripts.lerobot_record import (
+    RecordConfig,
+    _cleanup_record_devices,
+    _connect_record_devices,
+    _reset_rebot_rs_pico4,
+    record,
+    record_loop,
+)
 from lerobot.scripts.lerobot_replay import DatasetReplayConfig, ReplayConfig, replay
 from lerobot.scripts.lerobot_teleoperate import TeleoperateConfig, teleoperate
 from tests.fixtures.constants import DUMMY_REPO_ID
@@ -223,3 +230,80 @@ def test_record_loop_without_a_teleoperator_paces_and_terminates():
 
     # 0.1 s at 30 Hz is 3 ticks; the upper bound is what proves the phase was paced.
     assert 1 <= calls <= 6
+
+
+def test_rebot_rs_pico4_record_lifecycle_uses_safe_pose_sync():
+    calls = []
+    pose = [0.4, 0.1, 0.3, 1.0, 0.0, 0.0, 0.0, 0.02]
+
+    class FakePico4:
+        name = "pico4"
+
+        def __init__(self):
+            self.is_connected = False
+
+        def connect(self):
+            calls.append("teleop.connect")
+            self.is_connected = True
+
+        def reset_to_pose(self, pose_7d, gripper_pos):
+            calls.append(("teleop.reset_to_pose", list(pose_7d), gripper_pos))
+
+        def disconnect(self):
+            calls.append("teleop.disconnect")
+            self.is_connected = False
+
+    class FakeRebotRS:
+        name = "rebot_rs_follower"
+
+        def __init__(self):
+            self.is_connected = False
+            self._arm = None
+
+        def connect(self):
+            calls.append("robot.connect")
+            self.is_connected = True
+            self._arm = object()
+
+        def safe_home(self):
+            calls.append("robot.safe_home")
+
+        def go_to_start_position(self):
+            calls.append("robot.go_to_start_position")
+
+        def get_current_tcp_pose_quat(self):
+            calls.append("robot.get_current_tcp_pose_quat")
+            return pose
+
+        def reset_to_initial_position(self):
+            calls.append("robot.reset_to_initial_position")
+
+        def disconnect(self):
+            calls.append("robot.disconnect")
+            self.is_connected = False
+            self._arm = None
+
+    robot = FakeRebotRS()
+    teleop = FakePico4()
+
+    _connect_record_devices(robot, teleop)
+    assert calls == [
+        "teleop.connect",
+        "robot.connect",
+        "robot.safe_home",
+        "robot.go_to_start_position",
+        "robot.get_current_tcp_pose_quat",
+        ("teleop.reset_to_pose", pose[:7], pose[7]),
+    ]
+
+    calls.clear()
+    _reset_rebot_rs_pico4(teleop, robot)
+    assert calls == [
+        "robot.reset_to_initial_position",
+        "robot.get_current_tcp_pose_quat",
+        ("teleop.reset_to_pose", pose[:7], pose[7]),
+    ]
+
+    calls.clear()
+    _cleanup_record_devices(robot, teleop)
+    assert calls == ["robot.safe_home", "teleop.disconnect", "robot.disconnect"]

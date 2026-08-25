@@ -73,7 +73,7 @@ class DatasetRecordConfig:
     encoder_threads: int | None = None
     # Skip appending the date-time tag to repo_id, keeping the user-provided name as-is
     # (e.g. self-managed versioned names intended for a later `lerobot-edit-dataset merge`).
-    no_stamp: bool = False
+    no_stamp: bool = True
 
     def stamp_repo_id(self) -> None:
         """Append a date-time tag to ``repo_id`` so each recording session gets a unique name.

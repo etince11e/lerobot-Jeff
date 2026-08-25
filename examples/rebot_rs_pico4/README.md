@@ -59,6 +59,31 @@ lerobot-teleoperate \
   --dryrun=true
 ```
 
+### 录制数据集
+
+`pico4` 和 `rebot_rs_follower` 已集成到 `lerobot-record`。录制启动时会先连接
+Pico4，再连接机械臂并依次回机械零位、进入录制起始位，最后用机械臂当前 TCP
+位姿初始化 Pico4 的绝对目标，避免第一帧目标跳变。
+
+```bash
+lerobot-record \
+  --robot.type=rebot_rs_follower \
+  --robot.id=rebot_rs \
+  --teleop.type=pico4 \
+  --dataset.repo_id=${HF_USER}/rebot-rs-pico4-demo \
+  --dataset.single_task="Pick up the object" \
+  --dataset.num_episodes=10 \
+  --dataset.episode_time_s=60 \
+  --dataset.reset_time_s=20 \
+  --dataset.fps=30 \
+  --dataset.push_to_hub=false
+```
+
+录制期间按 Pico4 右手柄 A 键会让机械臂回到录制起始位，并重新同步 Pico4
+目标位姿。数据集 action 保存 `tcp.x/y/z`、`tcp.r1-r6` 和 `gripper.pos`；
+observation 保存关节位置、夹爪位置、TCP 位置以及已配置的相机画面。程序退出时
+机械臂会先安全回机械零位，再断开设备。
+
 ### 说明
 
 - 这个环境只面向 RS 遥操作。
@@ -127,6 +152,33 @@ lerobot-teleoperate \
   --fps=30 \
   --dryrun=true
 ```
+
+### Record a dataset
+
+`pico4` and `rebot_rs_follower` are integrated with `lerobot-record`. At startup,
+recording connects Pico4 first, connects the arm, moves through mechanical home and
+the recording start pose, then initializes Pico4's absolute target from the arm's
+current TCP pose to prevent a first-frame target jump.
+
+```bash
+lerobot-record \
+  --robot.type=rebot_rs_follower \
+  --robot.id=rebot_rs \
+  --teleop.type=pico4 \
+  --dataset.repo_id=${HF_USER}/rebot-rs-pico4-demo \
+  --dataset.single_task="Pick up the object" \
+  --dataset.num_episodes=10 \
+  --dataset.episode_time_s=60 \
+  --dataset.reset_time_s=20 \
+  --dataset.fps=30 \
+  --dataset.push_to_hub=false
+```
+
+During recording, press the A button on the right Pico4 controller to return the arm
+to the recording start pose and re-sync Pico4's target. Dataset actions contain
+`tcp.x/y/z`, `tcp.r1-r6`, and `gripper.pos`; observations contain joint positions,
+gripper position, TCP position, and frames from configured cameras. On exit, the arm
+returns safely to mechanical home before devices are disconnected.
 
 ### Notes
 

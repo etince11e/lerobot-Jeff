@@ -111,7 +111,7 @@ class RebotRSFollowerConfig:
     )
     wrist_camera: CameraConfig | None = field(
         default_factory=lambda: OpenCVCameraConfig(
-            index_or_path=Path("/dev/video3"),
+            index_or_path=Path("/dev/video4"),
             width=640,
             height=480,
             fps=30,

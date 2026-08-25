@@ -296,6 +296,30 @@ lerobot-teleoperate \
 
 Remember that this preview still connects both devices and may enable the robot drives.
 
+### 5. Record a dataset with PICO 4
+
+`pico4` and `rebot_rs_follower` are integrated with `lerobot-record`, using the same
+safe homing, start-pose, TCP synchronization, and shutdown sequence described above:
+
+```bash
+lerobot-record \
+  --robot.type=rebot_rs_follower \
+  --robot.id=rebot_rs \
+  --teleop.type=pico4 \
+  --teleop.id=pico4 \
+  --dataset.repo_id=${HF_USER}/rebot-rs-pico4-demo \
+  --dataset.single_task="Pick up the object" \
+  --dataset.num_episodes=10 \
+  --dataset.episode_time_s=60 \
+  --dataset.reset_time_s=20 \
+  --dataset.fps=30 \
+  --dataset.push_to_hub=false
+```
+
+During recording, press the A button on the right controller to return the arm to the
+recording start pose and re-sync the PICO target. If the default cameras are not
+connected, also add `--robot.head_camera=null --robot.wrist_camera=null`.
+
 ## Troubleshooting
 
 ### PICO reports all-zero controller data

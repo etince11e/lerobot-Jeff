@@ -301,6 +301,29 @@ lerobot-teleoperate \
 
 请注意，该预览模式仍会连接两个设备，并且可能使能机器人驱动器。
 
+### 5. 使用 PICO 4 录制数据集
+
+`pico4` 与 `rebot_rs_follower` 已集成到 `lerobot-record`，启动和退出时沿用上面的
+安全回零、起始位和 TCP 位姿同步流程：
+
+```bash
+lerobot-record \
+  --robot.type=rebot_rs_follower \
+  --robot.id=rebot_rs \
+  --teleop.type=pico4 \
+  --teleop.id=pico4 \
+  --dataset.repo_id=${HF_USER}/rebot-rs-pico4-demo \
+  --dataset.single_task="Pick up the object" \
+  --dataset.num_episodes=10 \
+  --dataset.episode_time_s=60 \
+  --dataset.reset_time_s=20 \
+  --dataset.fps=30 \
+  --dataset.push_to_hub=false
+```
+
+录制期间按右手柄 A 键可让机械臂回到录制起始位并重新同步 PICO 目标。若未连接
+默认相机，请同样添加 `--robot.head_camera=null --robot.wrist_camera=null`。
+
 ## 故障排查
 
 ### PICO 手柄数据全部为零
