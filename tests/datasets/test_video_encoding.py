@@ -27,6 +27,7 @@ pytest.importorskip("av", reason="av is required (install lerobot[dataset])")
 import av  # noqa: E402
 
 from lerobot.configs import VALID_VIDEO_CODECS, DepthEncoderConfig, RGBEncoderConfig, VideoEncoderConfig
+from lerobot.configs.dataset import DatasetRecordConfig
 from lerobot.datasets.image_writer import write_image
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.pyav_utils import get_codec
@@ -64,6 +65,16 @@ require_qsv = _require_encoder("h264_qsv")
 
 
 TEST_ARTIFACTS_DIR = Path(__file__).parent.parent / "artifacts" / "encoded_videos"
+
+
+@require_h264
+def test_recording_defaults_prioritize_fast_deferred_h264_encoding():
+    rgb_encoder = DatasetRecordConfig.__dataclass_fields__["rgb_encoder"].default_factory()
+
+    assert rgb_encoder.vcodec == "h264"
+    assert rgb_encoder.crf == 23
+    assert rgb_encoder.preset == "ultrafast"
+    assert DatasetRecordConfig.__dataclass_fields__["video_encoding_batch_size"].default == 0
 
 
 def _write_color_frames(imgs_dir: Path, num_frames: int = 4, height: int = 64, width: int = 96) -> None:

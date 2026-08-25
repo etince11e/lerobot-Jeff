@@ -15,10 +15,12 @@
 # limitations under the License.
 """Contract tests for DatasetWriter."""
 
+import shutil
 from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 import torch
 from PIL import Image
@@ -27,6 +29,7 @@ pytest.importorskip("datasets", reason="datasets is required (install lerobot[da
 
 from lerobot.configs import VideoEncoderConfig
 from lerobot.datasets.dataset_writer import _encode_video_worker
+from lerobot.datasets.io_utils import load_episodes
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.utils import DEFAULT_IMAGE_PATH
 from tests.fixtures.constants import DEFAULT_FPS, DUMMY_REPO_ID
@@ -78,8 +81,65 @@ def test_encode_video_worker_forwards_video_encoder(tmp_path):
             encoder_threads=4,
         )
 
-    assert captured_kwargs["video_encoder"].vcodec == "h264"
-    assert captured_kwargs["encoder_threads"] == 4
+        assert captured_kwargs["video_encoder"].vcodec == "h264"
+        assert captured_kwargs["encoder_threads"] == 4
+
+
+def test_save_episode_video_rolls_file_when_codec_changes(tmp_path):
+    video_key = "observation.images.cam"
+    features = {
+        video_key: {
+            "dtype": "video",
+            "shape": (64, 96, 3),
+            "names": ["height", "width", "channels"],
+        },
+        "action": {"dtype": "float32", "shape": (2,), "names": None},
+    }
+    dataset = LeRobotDataset.create(
+        repo_id=DUMMY_REPO_ID,
+        fps=DEFAULT_FPS,
+        features=features,
+        root=tmp_path / "codec_rollover",
+        use_videos=True,
+    )
+    latest_path = dataset.root / dataset.meta.video_path.format(
+        video_key=video_key, chunk_index=0, file_index=0
+    )
+    latest_path.parent.mkdir(parents=True, exist_ok=True)
+    latest_path.touch()
+    temp_dir = dataset.root / "encoded_episode"
+    temp_dir.mkdir()
+    episode_path = temp_dir / "episode.mp4"
+    episode_path.touch()
+    dataset.meta.latest_episode = {
+        "episode_index": [0],
+        f"videos/{video_key}/chunk_index": [0],
+        f"videos/{video_key}/file_index": [0],
+        f"videos/{video_key}/from_timestamp": [0.0],
+        f"videos/{video_key}/to_timestamp": [1.0],
+    }
+    av1_info = {
+        "video.codec": "av1",
+        "video.height": 64,
+        "video.width": 96,
+        "video.fps": DEFAULT_FPS,
+        "video.pix_fmt": "yuv420p",
+    }
+    h264_info = {**av1_info, "video.codec": "h264"}
+
+    with (
+        patch("lerobot.datasets.dataset_writer.get_file_size_in_mb", return_value=1.0),
+        patch("lerobot.datasets.dataset_writer.get_video_duration_in_s", return_value=1.0),
+        patch("lerobot.datasets.dataset_writer.get_video_info", side_effect=[av1_info, h264_info]),
+        patch("lerobot.datasets.dataset_writer.concatenate_video_files") as concatenate,
+    ):
+        metadata = dataset.writer._save_episode_video(video_key, 1, temp_path=episode_path)
+
+    assert metadata[f"videos/{video_key}/file_index"] == 1
+    assert metadata[f"videos/{video_key}/from_timestamp"] == 0.0
+    assert metadata[f"videos/{video_key}/to_timestamp"] == 1.0
+    assert (latest_path.parent / "file-001.mp4").is_file()
+    concatenate.assert_not_called()
 
 
 def test_encode_video_worker_default_video_encoder(tmp_path):
@@ -270,6 +330,174 @@ def test_batched_encoding_staging_survives_save(tmp_path):
     dataset.save_episode()  # first of a batch of 2: no encoding yet
 
     assert staging_dir.is_dir() and any(staging_dir.iterdir())
+
+
+def test_zero_batch_size_defers_video_encoding_until_finalize(tmp_path):
+    """A zero batch size keeps episodes collectable and encodes only at finalization."""
+    video_key = "observation.images.cam"
+    features = {
+        video_key: {
+            "dtype": "video",
+            "shape": (64, 96, 3),
+            "names": ["height", "width", "channels"],
+        },
+        "action": {"dtype": "float32", "shape": (2,), "names": None},
+    }
+    dataset = LeRobotDataset.create(
+        repo_id=DUMMY_REPO_ID,
+        fps=DEFAULT_FPS,
+        features=features,
+        root=tmp_path / "ds",
+        use_videos=True,
+        batch_encoding_size=0,
+    )
+    dataset.add_frame(_make_frame(features))
+
+    with patch.object(dataset.writer, "_batch_save_episode_video") as batch_encode:
+        dataset.save_episode()
+
+        batch_encode.assert_not_called()
+        assert dataset.writer._episodes_since_last_encoding == 1
+        assert dataset.writer._get_image_file_dir(0, video_key).is_dir()
+
+        dataset.finalize()
+
+    batch_encode.assert_called_once_with(0, 1)
+
+
+def test_deferred_encoding_after_resume_reads_new_episode_metadata(tmp_path):
+    """Regression: resumed episodes must be readable before final batch encoding."""
+    video_key = "observation.images.cam"
+    features = {
+        video_key: {
+            "dtype": "video",
+            "shape": (64, 96, 3),
+            "names": ["height", "width", "channels"],
+        },
+        "action": {"dtype": "float32", "shape": (2,), "names": None},
+    }
+    root = tmp_path / "resumed"
+    dataset = LeRobotDataset.create(
+        repo_id=DUMMY_REPO_ID,
+        fps=DEFAULT_FPS,
+        features=features,
+        root=root,
+        use_videos=True,
+        batch_encoding_size=1,
+    )
+    dataset.add_frame(_make_frame(features))
+    first_video_metadata = {
+        "episode_index": 0,
+        f"videos/{video_key}/chunk_index": 0,
+        f"videos/{video_key}/file_index": 0,
+        f"videos/{video_key}/from_timestamp": 0.0,
+        f"videos/{video_key}/to_timestamp": 1.0,
+    }
+    with patch.object(dataset.writer, "_save_episode_video", return_value=first_video_metadata):
+        dataset.save_episode()
+    shutil.rmtree(dataset.writer._get_image_file_dir(0, video_key))
+    dataset.finalize()
+
+    resumed = LeRobotDataset.resume(
+        DUMMY_REPO_ID,
+        root=root,
+        batch_encoding_size=0,
+    )
+    resumed.add_frame(_make_frame(features))
+    resumed.save_episode()
+
+    def save_resumed_video(_video_key: str, episode_index: int) -> dict:
+        assert resumed.writer._meta.latest_episode["episode_index"] == [0]
+        return {
+            "episode_index": episode_index,
+            f"videos/{video_key}/chunk_index": 0,
+            f"videos/{video_key}/file_index": 1,
+            f"videos/{video_key}/from_timestamp": 0.0,
+            f"videos/{video_key}/to_timestamp": 1.0,
+        }
+
+    with patch.object(resumed.writer, "_save_episode_video", side_effect=save_resumed_video):
+        resumed.finalize()
+
+    episodes = load_episodes(root)
+    assert len(episodes) == 2
+    assert episodes[1][f"videos/{video_key}/file_index"] == 1
+
+
+def test_periodic_batch_encoding_keeps_parquet_files_readable(tmp_path):
+    """Metadata checkpoints must preserve data and consistent video timestamp types."""
+    video_key = "observation.images.cam"
+    features = {
+        video_key: {
+            "dtype": "video",
+            "shape": (64, 96, 3),
+            "names": ["height", "width", "channels"],
+        },
+        "action": {"dtype": "float32", "shape": (2,), "names": None},
+    }
+    root = tmp_path / "periodic"
+    dataset = LeRobotDataset.create(
+        repo_id=DUMMY_REPO_ID,
+        fps=DEFAULT_FPS,
+        features=features,
+        root=root,
+        use_videos=True,
+        batch_encoding_size=2,
+    )
+
+    def save_video(_video_key: str, episode_index: int) -> dict:
+        return {
+            "episode_index": episode_index,
+            f"videos/{video_key}/chunk_index": 0,
+            f"videos/{video_key}/file_index": 0,
+            f"videos/{video_key}/from_timestamp": episode_index / 3,
+            f"videos/{video_key}/to_timestamp": (episode_index + 1) / 3,
+        }
+
+    with patch.object(dataset.writer, "_save_episode_video", side_effect=save_video):
+        for _ in range(4):
+            dataset.add_frame(_make_frame(features))
+            dataset.save_episode()
+        dataset.finalize()
+
+    episodes = load_episodes(root)
+    data_rows = sum(pq.ParquetFile(path).metadata.num_rows for path in root.rglob("data/**/*.parquet"))
+    assert episodes["episode_index"] == [0, 1, 2, 3]
+    assert episodes[f"videos/{video_key}/from_timestamp"] == pytest.approx([0, 1 / 3, 2 / 3, 1])
+    assert data_rows == 4
+
+
+def test_encoding_failure_does_not_leave_parquet_without_footer(tmp_path):
+    """Deferred encoding failures must leave frame data and episode metadata readable."""
+    video_key = "observation.images.cam"
+    features = {
+        video_key: {
+            "dtype": "video",
+            "shape": (64, 96, 3),
+            "names": ["height", "width", "channels"],
+        },
+        "action": {"dtype": "float32", "shape": (2,), "names": None},
+    }
+    root = tmp_path / "failed_encoding"
+    dataset = LeRobotDataset.create(
+        repo_id=DUMMY_REPO_ID,
+        fps=DEFAULT_FPS,
+        features=features,
+        root=root,
+        use_videos=True,
+        batch_encoding_size=0,
+    )
+    dataset.add_frame(_make_frame(features))
+    dataset.save_episode()
+
+    with (
+        patch.object(dataset.writer, "_batch_save_episode_video", side_effect=RuntimeError("encode failed")),
+        pytest.raises(RuntimeError, match="encode failed"),
+    ):
+        dataset.finalize()
+
+    assert sum(pq.ParquetFile(path).metadata.num_rows for path in root.rglob("data/**/*.parquet")) == 1
+    assert len(load_episodes(root)) == 1
 
 
 def test_finalize_is_idempotent(tmp_path):

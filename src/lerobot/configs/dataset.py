@@ -18,7 +18,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from .video import DepthEncoderConfig, RGBEncoderConfig, depth_encoder_defaults, rgb_encoder_defaults
+from .video import DepthEncoderConfig, RGBEncoderConfig, depth_encoder_defaults
+
+
+def recording_rgb_encoder_defaults() -> RGBEncoderConfig:
+    """Return fast RGB encoding defaults for interactive data collection."""
+    return RGBEncoderConfig(vcodec="h264", crf=23, preset="ultrafast")
 
 
 @dataclass
@@ -54,12 +59,13 @@ class DatasetRecordConfig:
     # Too many threads might cause unstable teleoperation fps due to main thread being blocked.
     # Not enough threads might cause low camera fps.
     num_image_writer_threads_per_camera: int = 4
-    # Number of episodes to record before batch encoding videos
-    # Set to 1 for immediate encoding (default behavior), or higher for batched encoding
-    video_encoding_batch_size: int = 1
+    # Number of episodes to record before batch encoding videos.
+    # Set to 0 to keep temporary frames and encode all pending episodes at finalization,
+    # 1 for immediate per-episode encoding, or a larger value for periodic batch encoding.
+    video_encoding_batch_size: int = 0
     # Video encoder settings for camera MP4s (codec, quality, GOP, etc.). Tuned via CLI nested keys,
     # e.g. ``--dataset.rgb_encoder.vcodec=h264`` (see ``RGBEncoderConfig``).
-    rgb_encoder: RGBEncoderConfig = field(default_factory=rgb_encoder_defaults)
+    rgb_encoder: RGBEncoderConfig = field(default_factory=recording_rgb_encoder_defaults)
     # Video encoder settings for depth-map MP4s (codec, quality, GOP, etc.). Tuned via CLI nested keys.
     depth_encoder: DepthEncoderConfig = field(default_factory=depth_encoder_defaults)
     # Enable streaming video encoding: encode frames in real-time during capture instead

@@ -65,6 +65,7 @@ from .video_utils import (
     concatenate_video_files,
     encode_video_frames,
     get_video_duration_in_s,
+    get_video_info,
 )
 
 logger = logging.getLogger(__name__)
@@ -130,7 +131,7 @@ class DatasetWriter:
             encoder_threads: Number of encoder threads (global). ``None``
                 lets the codec decide.
             batch_encoding_size: Number of episodes to accumulate before
-                batch-encoding videos.
+                batch-encoding videos. ``0`` defers encoding until finalization.
             streaming_encoder: Optional pre-built :class:`StreamingVideoEncoder`
                 for real-time encoding. ``None`` disables streaming mode.
             initial_frames: Starting frame count (non-zero when resuming).
@@ -140,6 +141,8 @@ class DatasetWriter:
         self._rgb_encoder = rgb_encoder or rgb_encoder_defaults()
         self._depth_encoder = depth_encoder or depth_encoder_defaults()
         self._encoder_threads = encoder_threads
+        if batch_encoding_size < 0:
+            raise ValueError("batch_encoding_size must be 0 (encode at finalization) or a positive integer")
         self._batch_encoding_size = batch_encoding_size
         self._streaming_encoder = streaming_encoder
 
@@ -149,7 +152,13 @@ class DatasetWriter:
         self._pq_writer: pq.ParquetWriter | None = None
         self._latest_episode: dict | None = None
         self._current_file_start_frame: int | None = None
-        self._episodes_since_last_encoding: int = 0
+        self._episodes_since_last_encoding = self._count_staged_video_episodes()
+        if self._episodes_since_last_encoding > 0:
+            logger.warning(
+                "Found temporary frames for %d previously saved episode(s); "
+                "they will be encoded at the next video flush.",
+                self._episodes_since_last_encoding,
+            )
         self._recorded_frames: int = initial_frames
         self._finalized = False
 
@@ -179,6 +188,21 @@ class DatasetWriter:
         if isinstance(episode_index, np.ndarray):
             episode_index = episode_index.item() if episode_index.size == 1 else episode_index[0]
         return int(episode_index)
+
+    def _count_staged_video_episodes(self) -> int:
+        """Count the contiguous trailing episodes whose video frames are still staged."""
+        if self._streaming_encoder is not None or self._batch_encoding_size == 1:
+            return 0
+
+        pending = 0
+        for episode_index in range(self._meta.total_episodes - 1, -1, -1):
+            staging_dirs = [
+                self._get_image_file_dir(episode_index, video_key) for video_key in self._meta.video_keys
+            ]
+            if not staging_dirs or not all(path.is_dir() and any(path.iterdir()) for path in staging_dirs):
+                break
+            pending += 1
+        return pending
 
     def _delete_camera_frame_dirs(self, camera_keys: list[str]) -> None:
         if self.image_writer is not None:
@@ -310,7 +334,9 @@ class DatasetWriter:
 
         has_video_keys = len(self._meta.video_keys) > 0
         use_streaming = self._streaming_encoder is not None and has_video_keys
-        use_batched_encoding = self._batch_encoding_size > 1
+        # ``0`` means fully deferred encoding: keep the temporary frames across
+        # episode boundaries and encode every pending episode during finalize().
+        use_batched_encoding = self._batch_encoding_size != 1
 
         if use_streaming:
             non_video_buffer = {
@@ -379,11 +405,14 @@ class DatasetWriter:
 
         if has_video_keys and use_batched_encoding:
             self._episodes_since_last_encoding += 1
-            if self._episodes_since_last_encoding == self._batch_encoding_size:
+            if (
+                self._batch_encoding_size > 1
+                and self._episodes_since_last_encoding >= self._batch_encoding_size
+            ):
                 start_ep = self._meta.total_episodes - self._batch_encoding_size
                 end_ep = self._meta.total_episodes
+                self._meta.flush_episode_metadata(continue_writing=True)
                 self._batch_save_episode_video(start_ep, end_ep)
-                self._episodes_since_last_encoding = 0
 
         if episode_data is None:
             # Post-save cleanup deliberately does not go through clear_episode_buffer():
@@ -398,45 +427,55 @@ class DatasetWriter:
         if end_episode is None:
             end_episode = self._meta.total_episodes
 
-        logger.info(
-            f"Batch encoding {self._batch_encoding_size} videos for episodes {start_episode} to {end_episode - 1}"
-        )
+        num_episodes = end_episode - start_episode
+        logger.info(f"Batch encoding {num_episodes} episodes from {start_episode} to {end_episode - 1}")
 
-        chunk_idx = self._meta.episodes[start_episode]["data/chunk_index"]
-        file_idx = self._meta.episodes[start_episode]["data/file_index"]
-        episode_df_path = self._root / DEFAULT_EPISODES_PATH.format(
-            chunk_index=chunk_idx, file_index=file_idx
-        )
-        episode_df = pd.read_parquet(episode_df_path)
+        self._meta.episodes = load_episodes(self._root)
+        if start_episode < 0 or end_episode > len(self._meta.episodes):
+            raise IndexError(
+                f"Cannot encode episodes {start_episode} to {end_episode - 1}: "
+                f"only {len(self._meta.episodes)} episode metadata rows are readable."
+            )
+
+        self._meta.latest_episode = None
+        if start_episode > 0:
+            previous_episode = self._meta.episodes[start_episode - 1]
+            self._meta.latest_episode = {key: [value] for key, value in previous_episode.items()}
 
         for ep_idx in range(start_episode, end_episode):
             logger.info(f"Encoding videos for episode {ep_idx}")
 
-            if (
-                self._meta.episodes[ep_idx]["data/chunk_index"] != chunk_idx
-                or self._meta.episodes[ep_idx]["data/file_index"] != file_idx
-            ):
-                episode_df.to_parquet(episode_df_path)
-                self._meta.episodes = load_episodes(self._root)
-
-                chunk_idx = self._meta.episodes[ep_idx]["data/chunk_index"]
-                file_idx = self._meta.episodes[ep_idx]["data/file_index"]
-                episode_df_path = self._root / DEFAULT_EPISODES_PATH.format(
-                    chunk_index=chunk_idx, file_index=file_idx
-                )
-                episode_df = pd.read_parquet(episode_df_path)
+            episode = self._meta.episodes[ep_idx]
+            chunk_idx = episode["meta/episodes/chunk_index"]
+            file_idx = episode["meta/episodes/file_index"]
+            episode_df_path = self._root / DEFAULT_EPISODES_PATH.format(
+                chunk_index=chunk_idx, file_index=file_idx
+            )
+            episode_df = pd.read_parquet(episode_df_path).set_index("episode_index", drop=False)
 
             video_ep_metadata = {}
             for video_key in self._meta.video_keys:
                 video_ep_metadata.update(self._save_episode_video(video_key, ep_idx))
             video_ep_metadata.pop("episode_index")
-            video_ep_df = pd.DataFrame(video_ep_metadata, index=[ep_idx]).convert_dtypes(
-                dtype_backend="pyarrow"
+            for key, value in video_ep_metadata.items():
+                if key.endswith(("/from_timestamp", "/to_timestamp")):
+                    if key not in episode_df:
+                        episode_df[key] = pd.Series(pd.NA, index=episode_df.index, dtype="Float64")
+                    else:
+                        episode_df[key] = episode_df[key].astype("Float64")
+                elif key.endswith(("/chunk_index", "/file_index")) and key not in episode_df:
+                    episode_df[key] = pd.Series(pd.NA, index=episode_df.index, dtype="Int64")
+                episode_df.loc[ep_idx, key] = value
+
+            episode_df.sort_index().reset_index(drop=True).convert_dtypes(dtype_backend="pyarrow").to_parquet(
+                episode_df_path, index=False
             )
 
-            episode_df = episode_df.combine_first(video_ep_df)
-            episode_df.to_parquet(episode_df_path)
-            self._meta.episodes = load_episodes(self._root)
+            latest_episode = {**episode, **video_ep_metadata}
+            self._meta.latest_episode = {key: [value] for key, value in latest_episode.items()}
+            self._episodes_since_last_encoding = max(0, self._episodes_since_last_encoding - 1)
+
+        self._meta.episodes = load_episodes(self._root)
 
     def _save_episode_data(self, episode_buffer: dict) -> dict:
         """Save episode data to a parquet file."""
@@ -517,18 +556,28 @@ class DatasetWriter:
         ep_size_in_mb = get_file_size_in_mb(ep_path)
         ep_duration_in_s = get_video_duration_in_s(ep_path)
 
-        if (
-            episode_index == 0
-            or self._meta.latest_episode is None
-            or f"videos/{video_key}/chunk_index" not in self._meta.latest_episode
-        ):
+        latest_video_chunk = None
+        if self._meta.latest_episode is not None:
+            latest_video_chunk = self._meta.latest_episode.get(f"videos/{video_key}/chunk_index")
+            if isinstance(latest_video_chunk, list):
+                latest_video_chunk = latest_video_chunk[0]
+
+        if episode_index == 0 or latest_video_chunk is None or pd.isna(latest_video_chunk):
             chunk_idx, file_idx = 0, 0
-            if self._meta.episodes is not None and len(self._meta.episodes) > 0:
-                old_chunk_idx = self._meta.episodes[-1][f"videos/{video_key}/chunk_index"]
-                old_file_idx = self._meta.episodes[-1][f"videos/{video_key}/file_index"]
-                chunk_idx, file_idx = update_chunk_file_indices(
-                    old_chunk_idx, old_file_idx, self._meta.chunks_size
-                )
+            if self._meta.episodes is not None:
+                video_chunk_key = f"videos/{video_key}/chunk_index"
+                video_file_key = f"videos/{video_key}/file_index"
+                for previous_index in range(min(episode_index, len(self._meta.episodes)) - 1, -1, -1):
+                    previous_episode = self._meta.episodes[previous_index]
+                    previous_chunk_idx = previous_episode.get(video_chunk_key)
+                    if previous_chunk_idx is None or pd.isna(previous_chunk_idx):
+                        continue
+                    chunk_idx, file_idx = update_chunk_file_indices(
+                        previous_chunk_idx,
+                        previous_episode[video_file_key],
+                        self._meta.chunks_size,
+                    )
+                    break
             latest_duration_in_s = 0.0
             new_path = self._root / self._meta.video_path.format(
                 video_key=video_key, chunk_index=chunk_idx, file_index=file_idx
@@ -546,7 +595,34 @@ class DatasetWriter:
             latest_size_in_mb = get_file_size_in_mb(latest_path)
             latest_duration_in_s = latest_ep[f"videos/{video_key}/to_timestamp"][0]
 
-            if latest_size_in_mb + ep_size_in_mb >= self._meta.video_files_size_in_mb:
+            compatibility_fields = (
+                "video.codec",
+                "video.height",
+                "video.width",
+                "video.fps",
+                "video.pix_fmt",
+            )
+            latest_video_info = get_video_info(latest_path)
+            episode_video_info = get_video_info(ep_path)
+            videos_are_compatible = all(
+                latest_video_info.get(field) == episode_video_info.get(field)
+                for field in compatibility_fields
+            )
+
+            if not videos_are_compatible:
+                logger.info(
+                    "Starting a new video file for %s because its encoded stream is incompatible with %s",
+                    video_key,
+                    latest_path,
+                )
+                chunk_idx, file_idx = update_chunk_file_indices(chunk_idx, file_idx, self._meta.chunks_size)
+                new_path = self._root / self._meta.video_path.format(
+                    video_key=video_key, chunk_index=chunk_idx, file_index=file_idx
+                )
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(ep_path), str(new_path))
+                latest_duration_in_s = 0.0
+            elif latest_size_in_mb + ep_size_in_mb >= self._meta.video_files_size_in_mb:
                 chunk_idx, file_idx = update_chunk_file_indices(chunk_idx, file_idx, self._meta.chunks_size)
                 new_path = self._root / self._meta.video_path.format(
                     video_key=video_key, chunk_index=chunk_idx, file_index=file_idx
@@ -690,12 +766,17 @@ class DatasetWriter:
             self.image_writer.wait_until_done()
             self.image_writer.stop()
             self.image_writer = None
-        # 2. Flush pending video encoding (streaming or batch)
-        self.flush_pending_videos()
-        # 3. Close own parquet writer
+        # 2. Close frame data first so an encoding failure cannot leave an
+        # unreadable parquet file without its footer.
         self.close_writer()
-        # 4. Finalize metadata (idempotent)
+        # 3. Streaming encoders only need to release their worker resources.
+        if self._streaming_encoder is not None:
+            self.flush_pending_videos()
+        # 4. Persist episode metadata before deferred encoding reads and updates it.
         self._meta.finalize()
+        # 5. Encode staged frames after both parquet writers are safely closed.
+        if self._streaming_encoder is None:
+            self.flush_pending_videos()
         self._finalized = True
 
     def __del__(self):

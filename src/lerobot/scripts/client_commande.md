@@ -1,10 +1,11 @@
 # Commands
 
--------------------------------------
-TELEOPERATE
--------------------------------------
+---
+
+## TELEOPERATE
 
 ## MONO Rebot + pico
+
 ```bash
 lerobot-teleoperate \
   --robot.type=rebot_rs_follower \
@@ -14,15 +15,12 @@ lerobot-teleoperate \
   --fps=30
 ```
 
+---
 
-
-
-
--------------------------------------
-RECORD
--------------------------------------
+## RECORD
 
 ## MONO Rebot + pico
+
 ```bash
 lerobot-record \
   --robot.type=rebot_rs_follower \
@@ -35,6 +33,10 @@ lerobot-record \
   --dataset.episode_time_s=300 \
   --dataset.reset_time_s=60 \
   --dataset.fps=30 \
+  --dataset.rgb_encoder.vcodec=h264 \
+  --dataset.rgb_encoder.crf=23 \
+  --dataset.rgb_encoder.preset=ultrafast \
+  --dataset.video_encoding_batch_size=0 \
   --dataset.push_to_hub=false \
   --resume=false \
   --dataset.root=~/.cache/huggingface/lerobot/etince11e/Tool-Storage
@@ -52,6 +54,10 @@ lerobot-record \
   --dataset.episode_time_s=300 \
   --dataset.reset_time_s=60 \
   --dataset.fps=30 \
+  --dataset.rgb_encoder.vcodec=h264 \
+  --dataset.rgb_encoder.crf=23 \
+  --dataset.rgb_encoder.preset=ultrafast \
+  --dataset.video_encoding_batch_size=0 \
   --dataset.push_to_hub=true \
   --resume=false \
   --dataset.root=~/.cache/huggingface/lerobot/etince11e/Object-Storage

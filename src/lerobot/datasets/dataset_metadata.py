@@ -123,6 +123,7 @@ class LeRobotDatasetMetadata:
         self.latest_episode = None
         self._metadata_buffer: list[dict] = []
         self._metadata_buffer_size = metadata_buffer_size
+        self._start_new_metadata_file = False
         self._finalized = False
 
         metadata_lock = contextlib.nullcontext()
@@ -195,6 +196,23 @@ class LeRobotDatasetMetadata:
             writer.close()
             self._pq_writer = None
 
+    def flush_episode_metadata(self, *, continue_writing: bool = False) -> None:
+        """Make buffered episode metadata readable from disk.
+
+        When recording continues after this checkpoint, the next episode starts a
+        new metadata parquet file. Parquet files cannot be safely reopened for
+        append after their footer has been written.
+
+        Args:
+            continue_writing: Whether more episodes will be saved after the flush.
+        """
+        self._close_writer()
+        self.episodes = load_episodes(self.root) if self.total_episodes > 0 else None
+        if self.episodes is not None and len(self.episodes) > 0:
+            latest_episode = self.episodes[-1]
+            self.latest_episode = {key: [value] for key, value in latest_episode.items()}
+        self._start_new_metadata_file = continue_writing
+
     def finalize(self) -> None:
         """Flush metadata buffer and close the parquet writer.
 
@@ -202,7 +220,7 @@ class LeRobotDatasetMetadata:
         """
         if getattr(self, "_finalized", False):
             return
-        self._close_writer()
+        self.flush_episode_metadata()
         self._finalized = True
 
     def __del__(self):
@@ -594,6 +612,15 @@ class LeRobotDatasetMetadata:
 
             episode_dict["meta/episodes/chunk_index"] = [chunk_idx]
             episode_dict["meta/episodes/file_index"] = [file_idx]
+        elif self._start_new_metadata_file:
+            chunk_idx = self.latest_episode["meta/episodes/chunk_index"][0]
+            file_idx = self.latest_episode["meta/episodes/file_index"][0]
+            chunk_idx, file_idx = update_chunk_file_indices(chunk_idx, file_idx, self.chunks_size)
+            episode_dict["meta/episodes/chunk_index"] = [chunk_idx]
+            episode_dict["meta/episodes/file_index"] = [file_idx]
+            episode_dict["dataset_from_index"] = [self.latest_episode["dataset_to_index"][0]]
+            episode_dict["dataset_to_index"] = [self.latest_episode["dataset_to_index"][0] + num_frames]
+            self._start_new_metadata_file = False
         else:
             chunk_idx = self.latest_episode["meta/episodes/chunk_index"][0]
             file_idx = self.latest_episode["meta/episodes/file_index"][0]
@@ -852,5 +879,6 @@ class LeRobotDatasetMetadata:
         obj.latest_episode = None
         obj._metadata_buffer = []
         obj._metadata_buffer_size = metadata_buffer_size
+        obj._start_new_metadata_file = False
         obj._finalized = False
         return obj

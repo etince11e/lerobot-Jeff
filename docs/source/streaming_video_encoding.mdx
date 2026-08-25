@@ -4,7 +4,7 @@
 
 Streaming video encoding eliminates the traditional PNG round-trip during video dataset recording. Instead of:
 
-1. Capture frame -> write PNG to disk -> (at episode end) read PNG's -> encode to MP4 -> delete PNG's
+1. Capture frame -> write PNG to disk -> (at recording finalization) read PNGs -> encode to MP4 -> delete PNGs
 
 Frames can be encoded in real-time during capture:
 
@@ -14,12 +14,15 @@ This makes `save_episode()` near-instant (the video is already encoded by the ti
 
 ## 2. Tuning Parameters
 
-| Parameter               | CLI Flag                          | Type          | Default       | Description                                                       |
-| ----------------------- | --------------------------------- | ------------- | ------------- | ----------------------------------------------------------------- |
-| `streaming_encoding`    | `--dataset.streaming_encoding`    | `bool`        | `True`        | Enable real-time encoding during capture                          |
-| `vcodec`                | `--dataset.rgb_encoder.vcodec`    | `str`         | `"libsvtav1"` | Video codec. `"auto"` detects best HW encoder                     |
-| `encoder_threads`       | `--dataset.encoder_threads`       | `int \| None` | `None` (auto) | Threads per encoder instance. `None` will leave the vcoded decide |
-| `encoder_queue_maxsize` | `--dataset.encoder_queue_maxsize` | `int`         | `30`          | Max buffered frames per camera (~1s at 30fps). Consumes RAM       |
+| Parameter                   | CLI Flag                              | Type          | Default       | Description                                                                  |
+| --------------------------- | ------------------------------------- | ------------- | ------------- | ---------------------------------------------------------------------------- |
+| `streaming_encoding`        | `--dataset.streaming_encoding`        | `bool`        | `False`       | Enable real-time encoding during capture                                     |
+| `video_encoding_batch_size` | `--dataset.video_encoding_batch_size` | `int`         | `0`           | `0` stages frames and encodes all pending episodes when recording finalizes |
+| `vcodec`                    | `--dataset.rgb_encoder.vcodec`        | `str`         | `"h264"`      | Video codec. `"auto"` detects the best available hardware encoder           |
+| `crf`                       | `--dataset.rgb_encoder.crf`           | `int \| float` | `23`          | H.264 quality level; lower values increase quality and file size             |
+| `preset`                    | `--dataset.rgb_encoder.preset`        | `int \| str`  | `"ultrafast"` | Codec speed/quality preset                                                    |
+| `encoder_threads`           | `--dataset.encoder_threads`           | `int \| None` | `None` (auto) | Threads per encoder instance. `None` leaves the codec to decide              |
+| `encoder_queue_maxsize`     | `--dataset.encoder_queue_maxsize`     | `int`         | `30`          | Max buffered frames per camera (~1s at 30fps). Consumes RAM                  |
 
 ## 3. Performance Considerations
 
@@ -76,8 +79,8 @@ Use HW encoding when:
 
 | Codec                 | CPU Usage | File Size      | Quality | Notes                                                            |
 | --------------------- | --------- | -------------- | ------- | ---------------------------------------------------------------- |
-| `libsvtav1` (default) | High      | Smallest       | Best    | Default. Best compression but most CPU-intensive                 |
-| `h264`                | Medium    | ~30-50% larger | Good    | Software H.264. Lower CPU                                        |
+| `libsvtav1`           | High      | Smallest       | Best    | Best compression but most CPU-intensive                          |
+| `h264` (default)      | Low       | ~30-50% larger | Good    | Software H.264 with the `ultrafast` recording preset              |
 | HW encoders           | Very Low  | Largest        | Good    | Offloads to dedicated hardware. Best for CPU-constrained systems |
 
 ### Available HW Encoders
@@ -96,7 +99,7 @@ Use HW encoding when:
 > In order to use the HW accelerated encoders you might need to upgrade your GPU drivers.
 
 > [!NOTE]
-> `libsvtav1` is the default because it provides the best training performance; other vcodecs can reduce CPU usage and be faster, but they typically produce larger files and may affect training time.
+> `h264` with `ultrafast` is the recording default to minimize collection pauses. Use `libsvtav1` explicitly when smaller files matter more than encoding time.
 
 ## 5. Troubleshooting
 
@@ -106,7 +109,7 @@ Use HW encoding when:
 | "Encoder queue full" warnings or dropped frames in dataset         | Encoder can't keep up (Queue overflow)       | If CPU is not at 100%: Increase `encoder_threads`, increase `encoder_queue_maxsize` or use HW encoding (`--dataset.rgb_encoder.vcodec=auto`).                                                                                                                                                    |
 | High RAM usage                                                     | Queue filling faster than encoding           | `encoder_threads` too low or CPU insufficient. Reduce `encoder_queue_maxsize` or use HW encoding                                                                                                                                                                                                 |
 | Large video files                                                  | Using HW encoder or H.264                    | Expected trade-off. Switch to `libsvtav1` if CPU allows                                                                                                                                                                                                                                          |
-| `save_episode()` still slow                                        | `streaming_encoding` is `False`              | Set `--dataset.streaming_encoding=true`                                                                                                                                                                                                                                                          |
+| `save_episode()` still slow                                        | Per-episode encoding was explicitly enabled  | Use `--dataset.video_encoding_batch_size=0`, or enable `--dataset.streaming_encoding=true`                                                                                                                                                                                                       |
 | Encoder thread crash                                               | Codec not available or invalid settings      | Check `vcodec` is installed, try `--dataset.rgb_encoder.vcodec=auto`                                                                                                                                                                                                                             |
 | Recorded dataset is missing frames                                 | CPU/GPU starvation or occasional load spikes | If ~5% of frames are missing, your system is likely overloaded — follow the recommendations above. If fewer frames are missing (~2%), they are probably due to occasional transient load spikes (often at startup) and can be considered expected.                                               |
 
@@ -140,13 +143,13 @@ lerobot-record --dataset.encoder_threads=2 ...
 
 ### Low-Resource Systems: modern 4+ cores (8+ threads) or Raspberry Pi 5
 
-On very constrained systems, streaming encoding may compete too heavily with the capture loop. Disabling it falls back to the PNG-based approach where encoding happens between episodes (blocking, but doesn't interfere with capture). Alternatively, record at a lower throughput to reduce both capture and encoding load. Consider also changing codec to `h264` and using batch encoding.
+On very constrained systems, streaming encoding may compete too heavily with the capture loop. The default non-streaming path writes temporary PNG frames, continues collecting subsequent episodes, and encodes the pending videos when recording finishes. Alternatively, record at a lower throughput to reduce both capture and encoding load.
 
 ```bash
 # 2camsx 640x480x3 @30fps: Requires some tuning.
 
-# Use H.264, disable streaming, consider batching encoding
-lerobot-record --dataset.rgb_encoder.vcodec=h264 --dataset.streaming_encoding=false ...
+# Stage frames while collecting, then encode once at the end
+lerobot-record --dataset.streaming_encoding=false --dataset.video_encoding_batch_size=0 ...
 ```
 
 ## 7. Closing note

@@ -23,6 +23,7 @@ import pytest
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
 
 from lerobot.datasets.dataset_metadata import LeRobotDatasetMetadata
+from lerobot.datasets.io_utils import load_episodes
 from lerobot.datasets.utils import INFO_PATH
 from tests.fixtures.constants import DEFAULT_FPS, DUMMY_ROBOT_TYPE
 
@@ -426,6 +427,30 @@ def test_finalize_flushes_buffered_metadata(tmp_path):
     assert episodes_dir.exists()
     parquet_files = list(episodes_dir.rglob("*.parquet"))
     assert len(parquet_files) > 0
+
+
+def test_flush_episode_metadata_can_continue_in_a_new_file(tmp_path):
+    """A readable metadata checkpoint must not overwrite earlier episodes."""
+    root = tmp_path / "checkpoint_ds"
+    meta = LeRobotDatasetMetadata.create(
+        repo_id="test/checkpoint",
+        fps=DEFAULT_FPS,
+        features=SIMPLE_FEATURES,
+        root=root,
+        use_videos=False,
+        metadata_buffer_size=100,
+    )
+    meta.save_episode_tasks(["Task 1"])
+    stats = _make_dummy_stats(meta.features)
+
+    meta.save_episode(0, 5, ["Task 1"], stats, {})
+    meta.flush_episode_metadata(continue_writing=True)
+    meta.save_episode(1, 5, ["Task 1"], stats, {})
+    meta.finalize()
+
+    episodes = load_episodes(root)
+    assert episodes["episode_index"] == [0, 1]
+    assert len(list((root / "meta" / "episodes").rglob("*.parquet"))) == 2
 
 
 # ── Tools accessor ───────────────────────────────────────────────────

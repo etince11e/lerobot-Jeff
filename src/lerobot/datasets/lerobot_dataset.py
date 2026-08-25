@@ -726,7 +726,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
             image_writer_threads: Number of threads for async image writing.
             video_backend: Video decoding backend (used when reading back).
             batch_encoding_size: Number of episodes to accumulate before
-                batch-encoding videos. ``1`` means encode immediately.
+                batch-encoding videos. ``0`` defers all pending video encoding
+                until :meth:`finalize`; ``1`` means encode immediately.
             rgb_encoder: Video encoder settings for cameras (codec, quality, etc.).
                 When ``None``, :func:`~lerobot.configs.video.rgb_encoder_defaults` is used.
             depth_encoder: Video encoder settings for depth cameras (codec, quality, etc.).
@@ -834,7 +835,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 if a local cache exists.
             video_backend: Video decoding backend for reading back data.
             batch_encoding_size: Number of episodes to accumulate before
-                batch-encoding videos.
+                batch-encoding videos. ``0`` defers all pending video encoding
+                until :meth:`finalize`; ``1`` means encode immediately.
             rgb_encoder: Video encoder settings for cameras (codec, quality, etc.).
                 When ``None``, :func:`~lerobot.configs.video.rgb_encoder_defaults` is used.
             depth_encoder: Video encoder settings for depth cameras (codec, quality, etc.).

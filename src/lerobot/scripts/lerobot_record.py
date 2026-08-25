@@ -565,9 +565,21 @@ def record(
         listener, events = init_keyboard_listener()
 
         if not cfg.dataset.streaming_encoding:
-            logging.info(
-                "Streaming encoding is disabled. If you have capable hardware, consider enabling it for way faster episode saving. --dataset.streaming_encoding=true --dataset.encoder_threads=2 # --dataset.rgb_encoder.vcodec=auto. More info in the documentation: https://huggingface.co/docs/lerobot/streaming_video_encoding"
-            )
+            if cfg.dataset.video_encoding_batch_size == 0:
+                logging.info(
+                    "Streaming encoding is disabled. Camera frames will be staged on disk while recording "
+                    "and all pending videos will be encoded when recording finishes."
+                )
+            elif cfg.dataset.video_encoding_batch_size == 1:
+                logging.info(
+                    "Streaming encoding is disabled and videos will be encoded after every episode. "
+                    "Use --dataset.video_encoding_batch_size=0 to defer encoding until recording finishes."
+                )
+            else:
+                logging.info(
+                    "Streaming encoding is disabled. Videos will be encoded every %d episodes.",
+                    cfg.dataset.video_encoding_batch_size,
+                )
 
         with VideoEncodingManager(dataset):
             recorded_episodes = 0
