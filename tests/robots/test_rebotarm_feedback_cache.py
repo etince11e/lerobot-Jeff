@@ -19,6 +19,11 @@ from threading import Event, Lock
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
+
+pytest.importorskip("motorbridge", reason="motorbridge is required for reBot RS SDK tests")
+pytest.importorskip("reBotArm_control_py", reason="reBotArm_control_py is required for reBot RS SDK tests")
+
 from motorbridge import CallError
 from reBotArm_control_py.actuator import JointCfg, JointGroup, RebotArm
 
