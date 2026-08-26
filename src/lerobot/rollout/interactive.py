@@ -201,6 +201,8 @@ class InteractiveSession:
             self._report_failure("Inference engine failed — shutting down.")
         elif event is RolloutEvent.STRATEGY_FAILED:
             self._report_failure("Rollout strategy failed (robot or recording error) — shutting down.")
+        elif event is RolloutEvent.START_FAILED:
+            self._print("Start pose preparation failed — policy control was not started.")
 
     def _report_answer(self, answer: QueryAnswer) -> None:
         """Render a resolved text query (an operator question or an autosteer turn)."""

@@ -290,6 +290,7 @@ def test_controller_start_reset_stop_flow_and_events():
     assert controller.start() is True
     assert _wait_for(run_started.is_set)
     assert controller.running
+    strategy.prepare_for_start.assert_called_once()
     assert strategy.reset_control_state.call_count == 1
     assert RolloutEvent.SEGMENT_STARTED in events
 
@@ -320,6 +321,21 @@ def test_controller_start_reset_stop_flow_and_events():
     _join_session(thread)
     strategy.teardown.assert_not_called()
     assert events[-1] is RolloutEvent.STOPPED
+
+
+def test_controller_does_not_start_policy_when_start_pose_fails():
+    controller, events, strategy, _engine, _parent, _run_started = _make_controller()
+    strategy.prepare_for_start.return_value = False
+    thread = _serve_thread(controller)
+
+    assert controller.start() is True
+    assert _wait_for(lambda: RolloutEvent.START_FAILED in events)
+    strategy.reset_control_state.assert_not_called()
+    strategy.run.assert_not_called()
+    assert not controller.running
+
+    controller.stop()
+    _join_session(thread)
 
 
 def test_controller_last_command_wins_over_a_pending_start():

@@ -149,15 +149,22 @@ class RolloutStrategy(abc.ABC):
         return False
 
     def _teardown_hardware(self, hw: HardwareContext, return_to_initial_position: bool = True) -> None:
-        """Stop the inference engine, optionally return robot to initial position, and disconnect hardware."""
+        """Stop inference, perform hardware-aware shutdown motion, and disconnect hardware."""
         if self._engine is not None:
             logger.info("Stopping inference engine...")
             self._engine.stop()
         robot = hw.robot_wrapper.inner
         if robot.is_connected:
-            if return_to_initial_position and hw.initial_position:
-                logger.info("Returning robot to initial position before shutdown...")
-                self.return_to_initial_position(hw)
+            if return_to_initial_position:
+                shutdown_hook = getattr(robot, "safe_home", None)
+                if callable(shutdown_hook):
+                    logger.info("Returning robot to its configured shutdown home before disconnect...")
+                    result = shutdown_hook()
+                    if result is False:
+                        logger.warning("Robot did not reach its configured shutdown home before disconnect")
+                elif hw.initial_position:
+                    logger.info("Returning robot to initial position before shutdown...")
+                    self.return_to_initial_position(hw)
             elif not return_to_initial_position:
                 logger.info(
                     "Skipping return-to-initial-position (disabled by config); leaving robot in final pose."
@@ -168,6 +175,21 @@ class RolloutStrategy(abc.ABC):
         if teleop is not None and teleop.is_connected:
             logger.info("Disconnecting teleoperator...")
             teleop.disconnect()
+
+    def prepare_for_start(self, ctx: RolloutContext, cancel_event=None) -> bool:
+        """Move hardware to its policy start pose before a control-loop segment."""
+        robot = ctx.hardware.robot_wrapper.inner
+        start_hook = getattr(robot, "go_to_start_position", None)
+        if not callable(start_hook):
+            return True
+
+        logger.info("Preparing robot at its configured start pose before rollout...")
+        try:
+            result = start_hook(cancel_event=cancel_event)
+        except Exception:
+            logger.exception("Failed to move robot to its configured start pose")
+            return False
+        return result is not False
 
     @staticmethod
     def return_to_initial_position(hw: HardwareContext, duration_s: float = 3.0, fps: int = 50) -> bool:
@@ -187,8 +209,8 @@ class RolloutStrategy(abc.ABC):
             # configured start pose).
             reset_hook = getattr(robot.inner, "reset_to_initial_position", None)
             if callable(reset_hook):
-                reset_hook()
-                return True
+                result = reset_hook()
+                return result is not False
 
             current_obs = robot.get_observation()
             current_pos = {k: v for k, v in current_obs.items() if k in target}

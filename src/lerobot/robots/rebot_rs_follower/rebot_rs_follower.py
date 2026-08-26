@@ -772,7 +772,8 @@ class RebotRSFollower(Robot):
         settle_thresh: float = 0.01,
         timeout: float = 15.0,
         gripper_target: float | None = None,
-    ) -> None:
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
         # A camera or teleoperator can fail after the actuator control loop has
         # already started. In that partial-startup state ``is_connected`` may
         # be false even though it is still possible (and required) to return
@@ -782,7 +783,8 @@ class RebotRSFollower(Robot):
             or self._arm_group is None
             or not getattr(self._arm, "control_loop_active", False)
         ):
-            return
+            logger.warning("Cannot move to %s: actuator control loop is not active", label)
+            return False
 
         # Explicit point-to-point moves must invalidate any in-flight teleop
         # IK result so it cannot overwrite the homing/start trajectory.
@@ -791,7 +793,8 @@ class RebotRSFollower(Robot):
         q_now = self._read_arm_positions(request_feedback=True)
         n = len(q_now)
         if n == 0:
-            return
+            logger.warning("Cannot move to %s: no joint feedback is available", label)
+            return False
 
         q_target = np.asarray(target[:n], dtype=np.float64)
         if gripper_target is not None and self._has_gripper:
@@ -807,7 +810,7 @@ class RebotRSFollower(Robot):
                 self._q_seed = q_target.copy()
                 self._ik_worker_seed = q_target.copy()
             logger.info("reBot RS already at %s.", label)
-            return
+            return True
 
         t_total = max(2.0 * max_err / max_vel, 0.5)
         num_steps = max(2, int(round(t_total * send_freq)))
@@ -822,9 +825,14 @@ class RebotRSFollower(Robot):
         deadline = time.monotonic() + timeout
         sleep_s = 1.0 / send_freq
         for q_cmd in traj:
+            if cancel_event is not None and cancel_event.is_set():
+                logger.warning("Move to %s cancelled before reaching the target", label)
+                self._invalidate_ik_requests()
+                return False
             if time.monotonic() > deadline:
                 logger.warning("reBot RS move to %s timed out before reaching target.", label)
-                break
+                self._invalidate_ik_requests()
+                return False
             with self._target_lock:
                 # Homing is an explicit point-to-point operation. Keep the
                 # sent command and newest goal synchronized so teleop
@@ -849,16 +857,25 @@ class RebotRSFollower(Robot):
 
         settle_deadline = time.monotonic() + 3.0
         while time.monotonic() < settle_deadline:
+            if cancel_event is not None and cancel_event.is_set():
+                logger.warning("Move to %s cancelled while waiting for settling", label)
+                self._invalidate_ik_requests()
+                return False
             q_now = self._read_arm_positions(request_feedback=True)
             if float(np.max(np.abs(q_now[:n] - q_target[:n]))) < settle_thresh:
-                break
+                # Discard any teleoperation request that may have arrived while the explicit
+                # point-to-point move was running. The next frame starts a fresh epoch.
+                self._invalidate_ik_requests()
+                logger.info("reBot RS reached %s.", label)
+                return True
             time.sleep(0.02)
 
         # Discard any teleoperation request that may have arrived while the
         # explicit point-to-point move was running.  The next teleop frame will
         # start a fresh epoch from this settled seed.
         self._invalidate_ik_requests()
-        logger.info("reBot RS reached %s.", label)
+        logger.warning("reBot RS did not reach %s within the settling timeout", label)
+        return False
 
     def safe_home(
         self,
@@ -868,14 +885,14 @@ class RebotRSFollower(Robot):
         settle_thresh: float = 0.01,
         timeout: float = 15.0,
         open_gripper: bool = False,
-    ) -> None:
+    ) -> bool:
         """Move the arm back to the mechanical zero pose before shutdown."""
 
         home = np.asarray(self.config.home_position[:6], dtype=np.float64)
         gripper_target = (
             float(self.config.gripper_open_pos) if open_gripper else float(self.config.home_position[6])
         )
-        self._move_to_joint_target(
+        return self._move_to_joint_target(
             home,
             label="mechanical home",
             max_vel=max_vel,
@@ -892,11 +909,12 @@ class RebotRSFollower(Robot):
         send_freq: float = 50.0,
         settle_thresh: float = 0.01,
         timeout: float = 15.0,
-    ) -> None:
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
         """Move the arm to the configured start pose."""
 
         start = np.asarray(self.config.start_position[:6], dtype=np.float64)
-        self._move_to_joint_target(
+        return self._move_to_joint_target(
             start,
             label="start pose",
             max_vel=max_vel,
@@ -904,11 +922,12 @@ class RebotRSFollower(Robot):
             settle_thresh=settle_thresh,
             timeout=timeout,
             gripper_target=float(self.config.start_position[6]),
+            cancel_event=cancel_event,
         )
 
-    def reset_to_initial_position(self) -> None:
+    def reset_to_initial_position(self) -> bool:
         """Compatibility alias used by the teleop loop for A-button homing."""
-        self.go_to_start_position()
+        return self.go_to_start_position()
 
     @check_if_not_connected
     def send_action(self, action: RobotAction) -> RobotAction:

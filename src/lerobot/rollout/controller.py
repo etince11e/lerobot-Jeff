@@ -120,6 +120,9 @@ class RolloutEvent(Enum):
     STRATEGY_FAILED = "strategy_failed"
     """``strategy.run()`` raised mid-segment (robot I/O, recording, ...); ``serve()`` is returning."""
 
+    START_FAILED = "start_failed"
+    """The robot could not reach its configured start pose; policy control was not started."""
+
     STOPPED = "stopped"
     """``serve()`` is returning (stop, front-end EOF, a failure, or a parent shutdown signal)."""
 
@@ -401,6 +404,14 @@ class RolloutController:
                 or engine.failed
             ):
                 return
+            if not self._strategy.prepare_for_start(self._ctx, cancel_event=self._segment_stop):
+                if not (
+                    self._stop_requested.is_set()
+                    or self._reset_requested.is_set()
+                    or self._global_shutdown.is_set()
+                ):
+                    self._emit(RolloutEvent.START_FAILED)
+                return
             self._strategy.reset_control_state()
             self._emit(RolloutEvent.SEGMENT_STARTED)
             try:
@@ -436,7 +447,7 @@ class RolloutController:
             self._emit(RolloutEvent.SEGMENT_ENDED)
 
     def _reset_robot(self) -> None:
-        """Pause inference and return the robot home (the task was restored by :meth:`reset`)."""
+        """Pause inference and return the robot to its policy start pose."""
         self._emit(RolloutEvent.RESET_STARTED)
         self._ctx.policy.inference.pause()
         if not self._ctx.hardware.initial_position:

@@ -71,6 +71,20 @@ def test_start_pose_and_safe_home_use_distinct_targets():
     assert robot._gripper_target == robot.config.home_position[6]
 
 
+def test_move_to_joint_target_reports_timeout_as_failure():
+    robot = RebotRSFollower(RebotRSFollowerRobotConfig(head_camera=None, wrist_camera=None))
+    robot._connected = True
+    robot._arm = MagicMock(control_loop_active=True)
+    robot._arm_group = MagicMock(num_joints=6)
+    robot._has_gripper = True
+    robot._read_arm_positions = MagicMock(return_value=np.zeros(6, dtype=np.float64))
+
+    with patch("lerobot.robots.rebot_rs_follower.rebot_rs_follower.time.monotonic", side_effect=[0.0, 2.0]):
+        reached = robot.go_to_start_position(timeout=1.0, max_vel=0.01, send_freq=10.0)
+
+    assert reached is False
+
+
 def test_get_observation_uses_camera_latest_buffer_without_reading_camera():
     robot = RebotRSFollower(RebotRSFollowerRobotConfig())
     robot._connected = True
