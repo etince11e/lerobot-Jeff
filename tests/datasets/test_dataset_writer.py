@@ -20,12 +20,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
-import pyarrow.parquet as pq
 import pytest
 import torch
 from PIL import Image
 
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+pytest.importorskip("pyarrow", reason="pyarrow is required (install lerobot[dataset])")
+
+import pyarrow.parquet as pq  # noqa: E402
 
 from lerobot.configs import VideoEncoderConfig
 from lerobot.datasets.dataset_writer import _encode_video_worker

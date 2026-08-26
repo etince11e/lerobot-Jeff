@@ -26,6 +26,7 @@ import pytest
 # tiers without it instead of erroring at import.
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
 pytest.importorskip("pandas", reason="pandas is required (install lerobot[dataset])")
+pytest.importorskip("pyarrow", reason="pyarrow is required (install lerobot[dataset])")
 
 import pyarrow.parquet as pq  # noqa: E402
 

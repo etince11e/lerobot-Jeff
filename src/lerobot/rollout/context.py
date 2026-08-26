@@ -375,9 +375,7 @@ def build_rollout_context(
     # ``.pos``/``.vel`` drops rebot TCP state and causes normalization shape
     # mismatches (for example, 7 hardware values vs a 10-dim checkpoint).
     observation_features_hw = {
-        k: v
-        for k, v in all_obs_features.items()
-        if isinstance(v, tuple) or v is float
+        k: v for k, v in all_obs_features.items() if isinstance(v, tuple) or v is float
     }
     policy_action_names = getattr(policy_config, "action_feature_names", None)
     observation_features_hw = _align_state_feature_order(
