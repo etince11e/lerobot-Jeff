@@ -27,6 +27,23 @@ lerobot-record \
   --robot.id=rebot_rs \
   --teleop.type=pico4 \
   --teleop.id=pico4 \
+  --dataset.repo_id=etince11e/Object-Storage \
+  --dataset.single_task="Put all the objects on the table into the box." \
+  --dataset.num_episodes=10 \
+  --dataset.episode_time_s=300 \
+  --dataset.reset_time_s=60 \
+  --dataset.fps=30 \
+  --dataset.push_to_hub=true \
+  --resume=true \
+  --dataset.root=/home/jeff/.cache/huggingface/lerobot/etince11e/Object-Storage
+```
+
+```bash
+lerobot-record \
+  --robot.type=rebot_rs_follower \
+  --robot.id=rebot_rs \
+  --teleop.type=pico4 \
+  --teleop.id=pico4 \
   --dataset.repo_id=etince11e/Tool-Storage \
   --dataset.single_task="Put all the tools on the table back into their correct places in the toolbox." \
   --dataset.num_episodes=10 \
@@ -61,4 +78,76 @@ lerobot-record \
   --dataset.push_to_hub=true \
   --resume=false \
   --dataset.root=~/.cache/huggingface/lerobot/etince11e/Object-Storage
+```
+
+---
+
+## TRAIN
+
+## MONO Rebot + pico
+
+```bash
+lerobot-train \
+  --dataset.repo_id=etince11e/Object-Storage \
+  --policy.type=act \
+  --policy.device=cuda \
+  --output_dir=outputs/train/act_Object_Storage_joint \
+  --job_name=act_rebot_task \
+  --batch_size=8 \
+  --steps=60000 \
+  --save_freq=10000 \
+  --wandb.enable=true \
+  --policy.repo_id=etince11e/act_Object_Storage_joint
+```
+
+```bash
+lerobot-train \
+  --dataset.repo_id=etince11e/Object-Storage \
+  --dataset.root=/home/jeff/.cache/huggingface/lerobot/etince11e/Object-Storage \
+  --dataset.revision=v0.1.0 \
+  --dataset.streaming=false \
+  --policy.type=act \
+  --output_dir=outputs/train/act_Object_Storage_joint \
+  --job_name=act_rebot_task \
+  --policy.device=cuda \
+  --wandb.enable=true \
+  --wandb.project=act_Object_Storage_joint \
+  --policy.push_to_hub=false \
+  --steps=50000 \
+  --save_freq=10000 \
+  --batch_size=8
+```
+
+---
+
+## inference
+
+## MONO Rebot + pico
+
+```bash
+lerobot-rollout \
+  --strategy.type=base \
+  --policy.path=outputs/train/act_Object_Storage_joint/checkpoints/050000/pretrained_model \
+  --robot.type=rebot_rs_follower \
+  --robot.id=rebot_rs \
+  --device=cuda \
+  --fps=30 \
+  --interactive=true \
+  --return_to_initial_position=true
+```
+
+---
+
+## debug
+
+## visualize camera
+
+```bash
+ffplay -f v4l2 -video_size 640x480 -framerate 30 /dev/video2
+```
+
+## watch utils GPU
+
+```bash
+watch -n 1 nvidia-smi
 ```
