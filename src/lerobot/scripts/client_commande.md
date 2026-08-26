@@ -4,8 +4,7 @@
 
 ## TELEOPERATE
 
-## MONO Rebot + pico
-
+### MONO Rebot + pico
 ```bash
 lerobot-teleoperate \
   --robot.type=rebot_rs_follower \
@@ -19,8 +18,7 @@ lerobot-teleoperate \
 
 ## RECORD
 
-## MONO Rebot + pico
-
+### MONO Rebot + pico
 ```bash
 lerobot-record \
   --robot.type=rebot_rs_follower \
@@ -84,22 +82,7 @@ lerobot-record \
 
 ## TRAIN
 
-## MONO Rebot + pico
-
-```bash
-lerobot-train \
-  --dataset.repo_id=etince11e/Object-Storage \
-  --policy.type=act \
-  --policy.device=cuda \
-  --output_dir=outputs/train/act_Object_Storage_joint \
-  --job_name=act_rebot_task \
-  --batch_size=8 \
-  --steps=60000 \
-  --save_freq=10000 \
-  --wandb.enable=true \
-  --policy.repo_id=etince11e/act_Object_Storage_joint
-```
-
+### MONO Rebot + pico
 ```bash
 lerobot-train \
   --dataset.repo_id=etince11e/Object-Storage \
@@ -118,12 +101,43 @@ lerobot-train \
   --batch_size=8
 ```
 
+
+#### 从第 30000 步继续训练，并把总训练步数延长到 100000：
+```bash
+lerobot-train \
+  --config_path=outputs/train/act_Object_Storage_joint/checkpoints/030000/pretrained_model/train_config.json \
+  --resume=true \
+  --steps=100000 \
+  --save_freq=10000
+```
+
+#### 从最新 checkpoint 继续：
+```bash
+lerobot-train \
+  --config_path=outputs/train/act_Object_Storage_joint/checkpoints/last/pretrained_model/train_config.json \
+  --resume=true \
+  --steps=100000
+  --save_freq=10000
+```
+
+#### 加载某个 checkpoint 的权重、重新开始一个新的训练任务：
+```bash
+lerobot-train \
+  --dataset.repo_id=etince11e/Object-Storage \
+  --dataset.root=/home/jeff/.cache/huggingface/lerobot/etince11e/Object-Storage \
+  --policy.path=outputs/train/act_Object_Storage_joint/checkpoints/030000/pretrained_model \
+  --output_dir=outputs/train/act_Object_Storage_joint_from_030000 \
+  --policy.device=cuda \
+  --steps=50000 \
+  --batch_size=8
+```
+
+
 ---
 
 ## inference
 
-## MONO Rebot + pico
-
+### MONO Rebot + pico
 ```bash
 lerobot-rollout \
   --strategy.type=base \
@@ -140,14 +154,13 @@ lerobot-rollout \
 
 ## debug
 
-## visualize camera
-
+### visualize camera
 ```bash
 ffplay -f v4l2 -video_size 640x480 -framerate 30 /dev/video2
 ```
 
-## watch utils GPU
 
+### watch utils GPU
 ```bash
 watch -n 1 nvidia-smi
 ```
