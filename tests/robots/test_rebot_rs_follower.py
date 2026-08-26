@@ -29,7 +29,7 @@ def test_camera_aliases_land_in_observation_features():
     assert robot.config.arm_control_mode == "mit"
     assert "head" in robot.config.cameras
     assert "wrist" in robot.config.cameras
-    assert str(robot.config.head_camera.index_or_path) == "/dev/video5"
+    assert str(robot.config.head_camera.index_or_path) == "/dev/video4"
     assert str(robot.config.wrist_camera.index_or_path) == "/dev/video2"
     assert robot.config.head_camera.fourcc == "MJPG"
     assert robot.config.wrist_camera.fourcc == "MJPG"
