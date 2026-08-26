@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 
 from lerobot.robots.rebot_rs_follower import RebotRSFollower, RebotRSFollowerRobotConfig
+from lerobot.robots.rebot_rs_follower.rebot_rs_follower import TCP_ACTION_KEYS
 
 
 def test_camera_aliases_land_in_observation_features():
@@ -37,6 +38,10 @@ def test_camera_aliases_land_in_observation_features():
     assert robot.config.home_position == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     assert robot.observation_features["head"] == (480, 640, 3)
     assert robot.observation_features["wrist"] == (480, 640, 3)
+    assert (
+        tuple(key for key, value in robot.observation_features.items() if value is float) == TCP_ACTION_KEYS
+    )
+    assert tuple(robot.action_features) == TCP_ACTION_KEYS
 
 
 def test_start_pose_and_safe_home_use_distinct_targets():
@@ -93,11 +98,16 @@ def test_get_observation_uses_camera_latest_buffer_without_reading_camera():
     robot._model = MagicMock()
     robot._arm_group = MagicMock(num_joints=6)
     robot._sdk.pad_q_for_model.side_effect = lambda _model, q, _n: np.asarray(q)
-    robot._sdk.compute_fk.return_value = (np.array([0.3, 0.2, 0.1], dtype=np.float64), None, None)
+    tcp_matrix = np.eye(4, dtype=np.float64)
+    robot._sdk.compute_fk.return_value = (
+        np.array([0.3, 0.2, 0.1], dtype=np.float64),
+        None,
+        tcp_matrix,
+    )
     robot._read_arm_positions = MagicMock(
         return_value=np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=np.float64)
     )
-    robot._read_gripper_position = MagicMock(return_value=0.75)
+    robot._read_gripper_position = MagicMock(return_value=robot.config.gripper_open_pos / 2)
 
     head_camera = MagicMock()
     head_camera.frame_lock = Lock()
@@ -111,9 +121,13 @@ def test_get_observation_uses_camera_latest_buffer_without_reading_camera():
 
     obs = robot.get_observation()
 
-    assert np.allclose([obs["joint1.pos"], obs["joint6.pos"]], [0.1, 0.6])
-    assert obs["gripper.pos"] == 0.75
+    assert not any(key.startswith("joint") for key in obs)
+    assert obs["gripper.pos"] == 0.5
     assert np.allclose([obs["tcp.x"], obs["tcp.y"], obs["tcp.z"]], [0.3, 0.2, 0.1])
+    assert np.allclose(
+        [obs[f"tcp.r{i}"] for i in range(1, 7)],
+        [1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+    )
     assert obs["head"].shape == (2, 2, 3)
     head_camera.read_latest.assert_not_called()
 
@@ -236,6 +250,26 @@ def test_send_action_only_submits_ik_request():
     robot._sdk.solve_ik.assert_not_called()
     with robot._ik_condition:
         assert robot._ik_request is not None
+
+
+def test_send_action_clips_normalized_gripper_before_returning_and_commanding():
+    config = RebotRSFollowerRobotConfig(head_camera=None, wrist_camera=None)
+    robot = RebotRSFollower(config)
+    robot._connected = True
+    robot._arm = MagicMock()
+    robot.cameras = {}
+    robot._sdk = MagicMock()
+    robot._sdk.pos_rot_to_se3.return_value = "target"
+
+    action = dict.fromkeys(robot.action_features, 0.0)
+    action["tcp.r1"] = 1.0
+    action["tcp.r5"] = 1.0
+    action["gripper.pos"] = 2.0
+
+    returned = robot.send_action(action)
+
+    assert returned["gripper.pos"] == 1.0
+    assert robot._gripper_target == config.gripper_open_pos
 
 
 def test_mit_control_sends_gravity_feedforward_torque():

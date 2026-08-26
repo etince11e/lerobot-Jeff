@@ -48,6 +48,10 @@ TCP_ACTION_KEYS = (
     "gripper.pos",
 )
 
+# The dataset stores robot state in the same Cartesian representation and
+# ordering as the action. Camera observations remain separate image features.
+TCP_OBSERVATION_KEYS = TCP_ACTION_KEYS
+
 
 def _try_import_rebotarm_sdk():
     return SimpleNamespace(
@@ -195,8 +199,7 @@ class RebotRSFollower(Robot):
 
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
-        features = {f"{joint}.pos": float for joint in self._arm_joint_names}
-        features.update({"gripper.pos": float, "tcp.x": float, "tcp.y": float, "tcp.z": float})
+        features: dict[str, type | tuple] = dict.fromkeys(TCP_OBSERVATION_KEYS, float)
         for cam_name, cfg in self.config.cameras.items():
             if getattr(cfg, "use_rgb", True):
                 features[cam_name] = (cfg.height, cfg.width, 3)
@@ -673,6 +676,15 @@ class RebotRSFollower(Robot):
             self.config.gripper_open_pos - self.config.gripper_closed_pos
         )
 
+    def _normalize_gripper_position(self, position: float) -> float:
+        """Map a physical gripper position to the dataset/control range [0, 1]."""
+        closed = float(self.config.gripper_closed_pos)
+        opened = float(self.config.gripper_open_pos)
+        if opened == closed:
+            raise ValueError("gripper_open_pos and gripper_closed_pos must be different")
+        normalized = (float(position) - closed) / (opened - closed)
+        return float(np.clip(normalized, 0.0, 1.0))
+
     def _read_camera_frame(self, cam_key: str):
         camera = self.cameras[cam_key]
 
@@ -724,19 +736,19 @@ class RebotRSFollower(Robot):
                 float(np.max(np.abs(q_command[: len(q)] - q))) if len(q) else None
             )
         q_padded = self._sdk.pad_q_for_model(self._model, q, len(q))
-        tcp_pos, _, _ = self._sdk.compute_fk(self._model, q_padded)
+        tcp_pos, _, tcp_matrix = self._sdk.compute_fk(self._model, q_padded)
+        rotation = np.asarray(tcp_matrix, dtype=np.float64)[:3, :3]
+        # Continuous 6D rotation representation: first two matrix columns.
+        rotation_6d = rotation[:, :2].T.reshape(6)
+        gripper_pos = self._normalize_gripper_position(self._read_gripper_position(request_feedback=False))
 
         obs: RobotObservation = {
-            f"{name}.pos": float(q[i]) for i, name in enumerate(self._arm_joint_names[: len(q)])
+            "tcp.x": float(tcp_pos[0]),
+            "tcp.y": float(tcp_pos[1]),
+            "tcp.z": float(tcp_pos[2]),
+            **{f"tcp.r{i + 1}": float(value) for i, value in enumerate(rotation_6d)},
+            "gripper.pos": gripper_pos,
         }
-        obs.update(
-            {
-                "gripper.pos": self._read_gripper_position(request_feedback=False),
-                "tcp.x": float(tcp_pos[0]),
-                "tcp.y": float(tcp_pos[1]),
-                "tcp.z": float(tcp_pos[2]),
-            }
-        )
 
         for cam_key, cam in self.cameras.items():
             if getattr(self.config.cameras[cam_key], "use_rgb", True):
@@ -945,8 +957,11 @@ class RebotRSFollower(Robot):
         if missing:
             raise ValueError(f"Missing rebot_rs_follower action keys: {missing}")
 
-        target = self._action_to_target(action)
-        gripper_target = self._gripper_from_action(action)
+        canonical_action = {key: float(action[key]) for key in TCP_ACTION_KEYS}
+        canonical_action["gripper.pos"] = float(np.clip(canonical_action["gripper.pos"], 0.0, 1.0))
+
+        target = self._action_to_target(canonical_action)
+        gripper_target = self._gripper_from_action(canonical_action)
 
         # Do not solve IK on the teleoperation thread.  Replace the mailbox
         # contents so a slow solve can never make old hand poses accumulate.
@@ -960,7 +975,7 @@ class RebotRSFollower(Robot):
             self._ik_condition.notify()
         with self._target_lock:
             self._gripper_target = gripper_target
-        return {key: float(action[key]) for key in TCP_ACTION_KEYS}
+        return canonical_action
 
     def disconnect(self) -> None:
         """Stop motion and release hardware, including partial connections.
