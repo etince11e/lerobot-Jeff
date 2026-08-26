@@ -180,6 +180,16 @@ class RolloutStrategy(abc.ABC):
         robot = hw.robot_wrapper
         target = hw.initial_position
         try:
+            # Cartesian robots cannot necessarily accept their observed joint
+            # positions through ``send_action``. Allow them to provide a safe,
+            # hardware-aware reset hook instead of forcing the generic joint
+            # interpolation path (rebot_rs_follower uses this to return to its
+            # configured start pose).
+            reset_hook = getattr(robot.inner, "reset_to_initial_position", None)
+            if callable(reset_hook):
+                reset_hook()
+                return True
+
             current_obs = robot.get_observation()
             current_pos = {k: v for k, v in current_obs.items() if k in target}
             steps = max(int(duration_s * fps), 1)
