@@ -256,8 +256,12 @@ def rollout(cfg: RolloutConfig):
             logger.info("Rollout setup complete — starting interactive session (robot idle until /start)")
             InteractiveSession(strategy, ctx).run()
         else:
-            logger.info("Rollout setup complete, starting rollout...")
-            strategy.run(ctx)
+            logger.info("Rollout setup complete — preparing robot at its configured start pose...")
+            if strategy.prepare_for_start(ctx, cancel_event=shutdown_event):
+                logger.info("Start pose ready, starting rollout...")
+                strategy.run(ctx)
+            else:
+                logger.error("Start pose preparation failed; policy rollout was not started")
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     finally:

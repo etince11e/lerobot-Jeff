@@ -773,6 +773,7 @@ class RebotRSFollower(Robot):
         timeout: float = 15.0,
         gripper_target: float | None = None,
         cancel_event: threading.Event | None = None,
+        settle_timeout: float = 3.0,
     ) -> bool:
         # A camera or teleoperator can fail after the actuator control loop has
         # already started. In that partial-startup state ``is_connected`` may
@@ -855,14 +856,16 @@ class RebotRSFollower(Robot):
             self._q_seed = q_target.copy()
             self._ik_worker_seed = q_target.copy()
 
-        settle_deadline = time.monotonic() + 3.0
+        settle_deadline = time.monotonic() + settle_timeout
+        last_error = float("inf")
         while time.monotonic() < settle_deadline:
             if cancel_event is not None and cancel_event.is_set():
                 logger.warning("Move to %s cancelled while waiting for settling", label)
                 self._invalidate_ik_requests()
                 return False
             q_now = self._read_arm_positions(request_feedback=True)
-            if float(np.max(np.abs(q_now[:n] - q_target[:n]))) < settle_thresh:
+            last_error = float(np.max(np.abs(q_now[:n] - q_target[:n])))
+            if last_error < settle_thresh:
                 # Discard any teleoperation request that may have arrived while the explicit
                 # point-to-point move was running. The next frame starts a fresh epoch.
                 self._invalidate_ik_requests()
@@ -874,7 +877,12 @@ class RebotRSFollower(Robot):
         # explicit point-to-point move was running.  The next teleop frame will
         # start a fresh epoch from this settled seed.
         self._invalidate_ik_requests()
-        logger.warning("reBot RS did not reach %s within the settling timeout", label)
+        logger.warning(
+            "reBot RS did not reach %s within the settling timeout (max joint error %.4f rad, tolerance %.4f)",
+            label,
+            last_error,
+            settle_thresh,
+        )
         return False
 
     def safe_home(
@@ -907,13 +915,14 @@ class RebotRSFollower(Robot):
         *,
         max_vel: float = 0.5,
         send_freq: float = 50.0,
-        settle_thresh: float = 0.01,
+        settle_thresh: float | None = None,
         timeout: float = 15.0,
         cancel_event: threading.Event | None = None,
     ) -> bool:
         """Move the arm to the configured start pose."""
 
         start = np.asarray(self.config.start_position[:6], dtype=np.float64)
+        settle_thresh = self.config.start_position_settle_thresh if settle_thresh is None else settle_thresh
         return self._move_to_joint_target(
             start,
             label="start pose",
@@ -923,6 +932,7 @@ class RebotRSFollower(Robot):
             timeout=timeout,
             gripper_target=float(self.config.start_position[6]),
             cancel_event=cancel_event,
+            settle_timeout=self.config.start_position_settle_timeout_s,
         )
 
     def reset_to_initial_position(self) -> bool:

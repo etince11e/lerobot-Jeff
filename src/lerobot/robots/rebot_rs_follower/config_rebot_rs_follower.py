@@ -89,6 +89,10 @@ class RebotRSFollowerConfig:
     start_position: list[float] = field(
         default_factory=lambda: [0.0163, 0.6469, 0.5653, -0.5734, 0.0225, 0.0290, 4.7]
     )
+    # Rollout start-pose checks are intentionally looser than the final home check because
+    # RobStride feedback can lag while the control loop is being primed.
+    start_position_settle_thresh: float = 0.05
+    start_position_settle_timeout_s: float = 3.0
 
     # Mechanical home pose used on Ctrl-C shutdown.
     home_position: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -132,6 +136,18 @@ class RebotRSFollowerConfig:
         if len(self.home_position) != 7:
             raise ValueError(
                 f"home_position must have 7 elements (J1..J6 + gripper), got {len(self.home_position)}"
+            )
+        if not math.isfinite(self.start_position_settle_thresh) or self.start_position_settle_thresh <= 0:
+            raise ValueError(
+                f"start_position_settle_thresh must be positive, got {self.start_position_settle_thresh}"
+            )
+        if (
+            not math.isfinite(self.start_position_settle_timeout_s)
+            or self.start_position_settle_timeout_s <= 0
+        ):
+            raise ValueError(
+                "start_position_settle_timeout_s must be positive, "
+                f"got {self.start_position_settle_timeout_s}"
             )
         if self.feedback_max_age_s <= 0:
             raise ValueError(f"feedback_max_age_s must be positive, got {self.feedback_max_age_s}")
