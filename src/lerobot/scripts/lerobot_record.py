@@ -174,6 +174,10 @@ from lerobot.utils.visualization_utils import (
 class RecordConfig:
     robot: RobotConfig
     dataset: DatasetRecordConfig
+    # Use lerobot-xense shifted-frame pairing for reBot RS recordings.
+    # When disabled, each frame stores the observation and action from the same
+    # control tick (the historical/default recording behavior).
+    shift_frame: bool = False
     # Teleoperator to control the robot (required)
     teleop: TeleoperatorConfig | None = None
     # Display all cameras on screen
@@ -203,6 +207,39 @@ class RecordConfig:
 
 def _is_rebot_rs_pico4(robot: Robot, teleop: Teleoperator | None) -> bool:
     return robot.name == "rebot_rs_follower" and teleop is not None and teleop.name == "pico4"
+
+
+def _uses_xense_shifted_frames(robot: Robot, shift_frame: bool) -> bool:
+    """Whether recording should pair each observation with the next observed robot state."""
+
+    return shift_frame and robot.name == "rebot_rs_follower"
+
+
+def _build_xense_shifted_action(
+    robot: Robot,
+    observation: RobotObservation,
+    commanded_action: RobotAction,
+) -> RobotAction:
+    """Build a shifted action while preserving the commanded gripper target.
+
+    TCP action dimensions come from the next observed robot state, following
+    lerobot-xense. The gripper is different: contact can prevent it from reaching
+    the requested opening, so imitation learning must retain the Pico command
+    rather than the measured gripper position.
+    """
+
+    missing = [key for key in robot.action_features if key not in observation]
+    if missing:
+        raise ValueError(
+            "Shifted-frame recording requires every action feature in the robot observation; "
+            f"missing={missing}"
+        )
+    action = {key: observation[key] for key in robot.action_features}
+    if "gripper.pos" in action:
+        if "gripper.pos" not in commanded_action:
+            raise ValueError("Shifted-frame recording requires gripper.pos in the commanded action")
+        action["gripper.pos"] = commanded_action["gripper.pos"]
+    return action
 
 
 def _sync_rebot_rs_pico4(teleop: Teleoperator, robot: Robot) -> None:
@@ -294,7 +331,8 @@ def _cleanup_record_devices(robot: Robot, teleop: Teleoperator | None) -> None:
                                V
                     [ robot.send_action() ] -- (Robot Executes)
                                V
-                    ( Save to Dataset )
+       reBot RS: save prev_observation + current observed state as action
+       other rigs: save current observation + sent action
                                V
                   ( Rerun Log / Loop Wait )
 """
@@ -322,6 +360,7 @@ def record_loop(
     display_mode: str = "rerun",
     display_compressed_images: bool = False,
     timer: CycleTimer | None = None,
+    shift_frame: bool = False,
 ):
     """Drive the robot from the teleoperator at *fps*, optionally recording each frame.
 
@@ -366,6 +405,15 @@ def record_loop(
     no_action_count = 0
     timestamp = 0
     start_episode_t = time.perf_counter()
+    use_shifted_frames = dataset is not None and _uses_xense_shifted_frames(robot, shift_frame)
+    previous_observation_frame = None
+    previous_sent_action = None
+    if use_shifted_frames:
+        logging.info(
+            "Using Xense shifted-frame recording for reBot RS: "
+            "TCP action comes from observed_state[t+1], while gripper action "
+            "keeps the Pico command from frame[t]."
+        )
     while timestamp < control_time_s:
         # Checked before `tick()`: this iteration is not a control tick, so it should not
         # be timed as one.
@@ -392,6 +440,10 @@ def record_loop(
                 act = teleop.get_action()
                 if _is_rebot_rs_pico4(robot, teleop) and teleop.get_reset_button():
                     _reset_rebot_rs_pico4(teleop, robot)
+                    # Do not connect an observation captured before the reset to a
+                    # state captured after the reset trajectory.
+                    previous_observation_frame = None
+                    previous_sent_action = None
                     timer.wait()
                     timestamp = time.perf_counter() - start_episode_t
                     continue
@@ -438,9 +490,25 @@ def record_loop(
         # Write to dataset
         if dataset is not None:
             with timer.section("record"):
-                action_frame = build_dataset_frame(dataset.features, sent_action, prefix=ACTION)
-                frame = {**observation_frame, **action_frame, "task": single_task}
-                dataset.add_frame(frame)
+                if use_shifted_frames:
+                    if previous_observation_frame is not None:
+                        # Match lerobot-xense's shifted-frame logic: the action is
+                        # the robot state observed one control tick after the saved
+                        # observation for TCP dimensions. Keep the gripper command
+                        # from that saved observation's control tick: an object may
+                        # physically stop the gripper before it reaches the target.
+                        if previous_sent_action is None:
+                            raise RuntimeError("Missing prior command for shifted-frame recording")
+                        observed_action = _build_xense_shifted_action(robot, obs, previous_sent_action)
+                        action_frame = build_dataset_frame(dataset.features, observed_action, prefix=ACTION)
+                        frame = {**previous_observation_frame, **action_frame, "task": single_task}
+                        dataset.add_frame(frame)
+                    previous_observation_frame = observation_frame
+                    previous_sent_action = dict(sent_action)
+                else:
+                    action_frame = build_dataset_frame(dataset.features, sent_action, prefix=ACTION)
+                    frame = {**observation_frame, **action_frame, "task": single_task}
+                    dataset.add_frame(frame)
 
         if display_data:
             with timer.section("telemetry"):
@@ -599,6 +667,7 @@ def record(
                     display_mode=cfg.display_mode,
                     display_compressed_images=display_compressed_images,
                     timer=timer,
+                    shift_frame=cfg.shift_frame,
                 )
 
                 # Execute a few seconds without recording to give time to manually reset the environment

@@ -17,6 +17,7 @@
 import re
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
@@ -36,6 +37,7 @@ from lerobot.scripts.lerobot_record import (
 )
 from lerobot.scripts.lerobot_replay import DatasetReplayConfig, ReplayConfig, replay
 from lerobot.scripts.lerobot_teleoperate import TeleoperateConfig, teleoperate
+from lerobot.teleoperators import make_teleoperator_from_config
 from tests.fixtures.constants import DUMMY_REPO_ID
 from tests.mocks.mock_robot import MockRobotConfig
 from tests.mocks.mock_teleop import MockTeleopConfig
@@ -230,6 +232,142 @@ def test_record_loop_without_a_teleoperator_paces_and_terminates():
 
     # 0.1 s at 30 Hz is 3 ticks; the upper bound is what proves the phase was paced.
     assert 1 <= calls <= 6
+
+
+def test_rebot_rs_record_loop_uses_xense_shifted_frames():
+    robot = make_robot_from_config(MockRobotConfig(n_motors=1, random_values=False, static_values=[0.0]))
+    teleop = make_teleoperator_from_config(
+        MockTeleopConfig(n_motors=1, random_values=False, static_values=[10.0])
+    )
+    robot.name = "rebot_rs_follower"
+    robot.__dict__["action_features"] = {"tcp.x": float, "gripper.pos": float}
+    robot.connect()
+    teleop.connect()
+    teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
+    events = {"exit_early": False, "stop_recording": False, "rerecord_episode": False}
+    observations = iter([(0.0, 1.0), (1.0, 0.8), (2.0, 0.6)])
+    pico_actions = iter([(10.0, 0.0), (11.0, 0.25), (12.0, 1.0)])
+
+    def get_observation():
+        tcp_x, measured_gripper = next(observations)
+        if tcp_x == 2.0:
+            events["exit_early"] = True
+        return {"tcp.x": tcp_x, "gripper.pos": measured_gripper}
+
+    def get_action():
+        tcp_x, commanded_gripper = next(pico_actions)
+        return {"tcp.x": tcp_x, "gripper.pos": commanded_gripper}
+
+    robot.get_observation = get_observation
+    teleop.get_action = get_action
+
+    class DatasetSpy:
+        fps = 1000
+        features = {
+            "observation.state": {
+                "dtype": "float32",
+                "shape": (2,),
+                "names": ["tcp.x", "gripper.pos"],
+            },
+            "action": {
+                "dtype": "float32",
+                "shape": (2,),
+                "names": ["tcp.x", "gripper.pos"],
+            },
+        }
+
+        def __init__(self):
+            self.frames = []
+
+        def add_frame(self, frame):
+            self.frames.append(frame)
+
+    dataset = DatasetSpy()
+
+    try:
+        record_loop(
+            robot=robot,
+            events=events,
+            fps=dataset.fps,
+            teleop_action_processor=teleop_action_processor,
+            robot_action_processor=robot_action_processor,
+            robot_observation_processor=robot_observation_processor,
+            teleop=teleop,
+            dataset=dataset,
+            control_time_s=1.0,
+            single_task="shifted",
+            shift_frame=True,
+        )
+    finally:
+        teleop.disconnect()
+        robot.disconnect()
+
+    assert len(dataset.frames) == 2
+    np.testing.assert_allclose(dataset.frames[0]["observation.state"], np.array([0.0, 1.0]))
+    np.testing.assert_allclose(dataset.frames[0]["action"], np.array([1.0, 0.0]))
+    np.testing.assert_allclose(dataset.frames[1]["observation.state"], np.array([1.0, 0.8]))
+    np.testing.assert_allclose(dataset.frames[1]["action"], np.array([2.0, 0.25]))
+
+
+def test_rebot_rs_record_loop_uses_same_tick_frames_by_default():
+    robot = make_robot_from_config(MockRobotConfig(n_motors=1, random_values=False, static_values=[0.0]))
+    teleop = make_teleoperator_from_config(
+        MockTeleopConfig(n_motors=1, random_values=False, static_values=[10.0])
+    )
+    robot.name = "rebot_rs_follower"
+    robot.connect()
+    teleop.connect()
+    teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
+    events = {"exit_early": False, "stop_recording": False, "rerecord_episode": False}
+    observations = iter([0.0, 1.0])
+    actions = iter([10.0, 11.0])
+
+    def get_observation():
+        value = next(observations)
+        if value == 1.0:
+            events["exit_early"] = True
+        return {"motor_1.pos": value}
+
+    robot.get_observation = get_observation
+    teleop.get_action = lambda: {"motor_1.pos": next(actions)}
+
+    class DatasetSpy:
+        fps = 1000
+        features = {
+            "observation.state": {"dtype": "float32", "shape": (1,), "names": ["motor_1.pos"]},
+            "action": {"dtype": "float32", "shape": (1,), "names": ["motor_1.pos"]},
+        }
+
+        def __init__(self):
+            self.frames = []
+
+        def add_frame(self, frame):
+            self.frames.append(frame)
+
+    dataset = DatasetSpy()
+
+    try:
+        record_loop(
+            robot=robot,
+            events=events,
+            fps=dataset.fps,
+            teleop_action_processor=teleop_action_processor,
+            robot_action_processor=robot_action_processor,
+            robot_observation_processor=robot_observation_processor,
+            teleop=teleop,
+            dataset=dataset,
+            control_time_s=1.0,
+            single_task="same-tick",
+        )
+    finally:
+        teleop.disconnect()
+        robot.disconnect()
+
+    assert len(dataset.frames) == 2
+    np.testing.assert_allclose(dataset.frames[0]["observation.state"], np.array([0.0]))
+    np.testing.assert_allclose(dataset.frames[0]["action"], np.array([10.0]))
+    np.testing.assert_allclose(dataset.frames[1]["observation.state"], np.array([1.0]))
+    np.testing.assert_allclose(dataset.frames[1]["action"], np.array([11.0]))
 
 
 def test_rebot_rs_pico4_record_lifecycle_uses_safe_pose_sync():

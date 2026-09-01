@@ -902,7 +902,7 @@ class RebotRSFollower(Robot):
         *,
         max_vel: float = 0.5,
         send_freq: float = 50.0,
-        settle_thresh: float = 0.01,
+        settle_thresh: float = 0.05,
         timeout: float = 15.0,
         open_gripper: bool = False,
     ) -> bool:

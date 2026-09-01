@@ -105,7 +105,7 @@ class RebotRSFollowerConfig:
     # observation schema and Rerun display pick them up automatically.
     head_camera: CameraConfig | None = field(
         default_factory=lambda: OpenCVCameraConfig(
-            index_or_path=Path("/dev/video4"),
+            index_or_path=Path("/dev/video6"),
             width=640,
             height=480,
             fps=30,
@@ -115,7 +115,7 @@ class RebotRSFollowerConfig:
     )
     wrist_camera: CameraConfig | None = field(
         default_factory=lambda: OpenCVCameraConfig(
-            index_or_path=Path("/dev/video2"),
+            index_or_path=Path("/dev/video9"),
             width=640,
             height=480,
             fps=30,

@@ -25,15 +25,17 @@ lerobot-record \
   --robot.id=rebot_rs \
   --teleop.type=pico4 \
   --teleop.id=pico4 \
-  --dataset.repo_id=etince11e/Object-Storage \
-  --dataset.single_task="Put all the objects on the table into the box." \
-  --dataset.num_episodes=10 \
+  --dataset.repo_id=etince11e/Objects-Into-Box-0826 \
+  --dataset.single_task="Put all the objects in the black area into the box." \
+  --dataset.num_episodes=28 \
   --dataset.episode_time_s=300 \
   --dataset.reset_time_s=60 \
   --dataset.fps=30 \
+  --dataset.rgb_encoder.vcodec=h264 \
+  --dataset.streaming_encoding=true \
   --dataset.push_to_hub=true \
   --resume=true \
-  --dataset.root=/home/jeff/.cache/huggingface/lerobot/etince11e/Object-Storage
+  --dataset.root=/home/jeff/.cache/huggingface/lerobot/etince11e/Objects-Into-Box-0826
 ```
 
 ```bash
@@ -141,7 +143,7 @@ lerobot-train \
 ```bash
 lerobot-rollout \
   --strategy.type=base \
-  --policy.path=outputs/train/act_Object_Storage_joint/checkpoints/050000/pretrained_model \
+  --policy.path=outputs/train/act_Object_Storage_joint/checkpoints/100000/pretrained_model \
   --robot.type=rebot_rs_follower \
   --robot.id=rebot_rs \
   --device=cuda \
