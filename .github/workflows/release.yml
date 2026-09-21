@@ -137,7 +137,7 @@ jobs:
           git curl libglib2.0-0 libegl1-mesa-dev ffmpeg libusb-1.0-0-dev \
           speech-dispatcher libgeos-dev portaudio19-dev
       - name: Setup uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
         with:
           enable-cache: true # zizmor: ignore[cache-poisoning]
           version: ${{ env.UV_VERSION }}
